@@ -25,7 +25,7 @@ jobs:
       - name: Install System Dependencies (OpenCV/MediaPipe)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-glx libusb-1.0-0
+          sudo apt-get install -y libgl1 libusb-1.0-0
 
       - name: Install Python Dependencies
         run: |
