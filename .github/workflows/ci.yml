@@ -2,8 +2,13 @@ name: CI Quality Check
 
 on: [push, pull_request]
 
+env:
+  # Forzamos el uso de Node 24 para evitar los avisos de deprecación
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test:
+    name: "Python Quality and Unit Tests"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
