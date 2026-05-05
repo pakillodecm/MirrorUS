@@ -1,0 +1,37 @@
+name: "🚀 Feature Request"
+title: "[FEAT]: "
+description: Propón una nueva funcionalidad o mejora.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Descripción
+      value: |
+        ### Problema / Oportunidad
+        [Describe qué falta o qué quieres mejorar]
+
+        ### Propuesta
+        [Describe brevemente la solución técnica o funcional]
+    validations:
+      required: true
+  - type: checkboxes
+    id: definition_of_done
+    attributes:
+      label: "Criterios de Aceptación (DoD)"
+      description: "No debe cerrarse la issue hasta que todo esto esté marcado."
+      options:
+        - label: Funcionalidad principal implementada
+        - label: Tests unitarios/integración añadidos
+        - label: Documentación actualizada (ReadMe/Swagger)
+        - label: Revisado en entorno de desarrollo/staging
+  - type: dropdown
+    id: impact_level
+    attributes:
+      label: Prioridad Estratégica
+      options:
+        - Alta (Valor inmediato)
+        - Media (Mejora deseable)
+        - Baja (Pagar deuda técnica / Estética)
+    validations:
+      required: true
