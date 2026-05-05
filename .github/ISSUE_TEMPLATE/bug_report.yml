@@ -15,18 +15,16 @@ body:
     attributes:
       label: Pasos y Evidencia
       value: |
-        ### Pasos para reproducirlo
+        **Pasos para reproducirlo**
         1. [Acción inicial]
         2. [Qué hiciste después]
         3. [Resultado observado]
 
-        ### Resultado esperado
+        **Resultado esperado**
         [Describe cómo debería ser el comportamiento normal]
-        -
 
-        ### Resultado obtenido
+        **Resultado obtenido**
         [Describe el comportamiento real que observaste]
-        -
     validations:
       required: true
   - type: textarea
@@ -41,8 +39,8 @@ body:
       label: Severidad / Bloqueo
       description: ¿Cuánto te impide seguir trabajando?
       options:
-        - Bloqueante (No puedo continuar)
-        - Mayor (Funcionalidad rota, pero puedo avanzar en otra cosa)
-        - Menor (Fallo visual o detalle no crítico)
+        - 🔴 Bloqueante (No puedo continuar)
+        - 🟡 Mayor (Funcionalidad rota, pero puedo avanzar en otra cosa)
+        - 🔵 Menor (Fallo visual o detalle no crítico)
     validations:
       required: true
