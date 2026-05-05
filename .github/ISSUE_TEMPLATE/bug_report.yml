@@ -1,0 +1,48 @@
+name: "🐛 Bug Report"
+title: "[BUG]: "
+description: Reporta un error técnico para que pueda ser corregido.
+labels: ["bug"]
+body:
+  - type: input
+    id: location
+    attributes:
+      label: "¿Dónde ocurre?"
+      placeholder: "Ej: Pantalla de Login / Endpoint /v1/auth"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Pasos y Evidencia
+      value: |
+        ### Pasos para reproducirlo
+        1. [Acción inicial]
+        2. [Qué hiciste después]
+        3. [Resultado observado]
+
+        ### Resultado esperado
+        [Describe cómo debería ser el comportamiento normal]
+        -
+
+        ### Resultado obtenido
+        [Describe el comportamiento real que observaste]
+        -
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs o Código relacionado
+      render: shell
+      placeholder: "Pega aquí el traceback o el fragmento de código sospechoso"
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severidad / Bloqueo
+      description: ¿Cuánto te impide seguir trabajando?
+      options:
+        - Bloqueante (No puedo continuar)
+        - Mayor (Funcionalidad rota, pero puedo avanzar en otra cosa)
+        - Menor (Fallo visual o detalle no crítico)
+    validations:
+      required: true
