@@ -8,10 +8,10 @@ body:
     attributes:
       label: Descripción
       value: |
-        ### Problema / Oportunidad
+        **Problema / Oportunidad**
         [Describe qué falta o qué quieres mejorar]
 
-        ### Propuesta
+        **Propuesta**
         [Describe brevemente la solución técnica o funcional]
     validations:
       required: true
@@ -30,8 +30,8 @@ body:
     attributes:
       label: Prioridad Estratégica
       options:
-        - Alta (Valor inmediato)
-        - Media (Mejora deseable)
-        - Baja (Pagar deuda técnica / Estética)
+        - 💎 Alta (Valor inmediato)
+        - ⚡ Media (Mejora deseable)
+        - 🍃 Baja (Pagar deuda técnica / Estética)
     validations:
       required: true
