@@ -9,7 +9,9 @@ dependencies = [
     "streamlit",
     "mediapipe",
     "opencv-python",
-    "numpy"
+    "numpy",
+    "streamlit-webrtc",
+    "av",
 ]
 
 [tool.setuptools]
