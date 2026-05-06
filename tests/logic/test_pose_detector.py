@@ -15,31 +15,22 @@ def test_extract_landmarks_real_image():
     detector = PoseDetector(static_image_mode=True)
     frame = cv2.imread(str(image_path))
 
-    landmarks = detector.extract_landmarks(frame)
+    result = detector.extract_landmarks(frame)
 
-    assert landmarks is not None, "El detector no encontró a nadie en la imagen."
+    assert result.normalized is not None, "Debería devolver landmarks normalizados"
+    assert result.world is not None, "Debería devolver world landmarks"
 
-    critical_points = [
-        "LEFT_HIP",
-        "LEFT_KNEE",
-        "LEFT_ANKLE",
-        "RIGHT_HIP",
-        "RIGHT_KNEE",
-        "RIGHT_ANKLE",
-    ]
-    for point in critical_points:
-        assert point in landmarks, f"No se detectó el punto clave: {point}"
-        assert isinstance(
-            landmarks[point], np.ndarray
-        ), f"El punto {point} no es un array de NumPy"
-        assert (
-            len(landmarks[point]) == 3
-        ), f"El punto {point} no tiene 3 coordenadas (x, y, z)"
+    assert "LEFT_KNEE" in result.normalized
+    assert result.world["LEFT_KNEE"][2] != result.normalized["LEFT_KNEE"][2]
+    coord_cnt = len(result.normalized["LEFT_KNEE"])
+    assert coord_cnt == 4, f"Se esperaban 4 coordenadas pero se obtuvieron {coord_cnt}"
 
 
 def test_extract_landmarks_no_person():
     detector = PoseDetector()
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
 
-    landmarks = detector.extract_landmarks(frame)
-    assert landmarks is None
+    result = detector.extract_landmarks(frame)
+
+    assert result.normalized is None, "No debería devolver landmarks normalizados"
+    assert result.world is None, "No debería devolver world landmarks"

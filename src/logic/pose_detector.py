@@ -1,7 +1,14 @@
 import cv2
 import mediapipe as mp
 import numpy as np
-from typing import Dict, Optional
+from typing import Dict, NamedTuple, Optional
+
+
+class PoseResult(NamedTuple):
+    """Estructura de datos para los resultados de la detección."""
+
+    normalized: Optional[Dict[str, np.ndarray]]
+    world: Optional[Dict[str, np.ndarray]]
 
 
 class PoseDetector:
@@ -19,23 +26,29 @@ class PoseDetector:
             min_tracking_confidence=min_tracking_confidence,
         )
 
-    def extract_landmarks(self, frame: np.ndarray) -> Optional[Dict[str, np.ndarray]]:
+    def extract_landmarks(self, frame: np.ndarray) -> PoseResult:
         """
-        Procesa un frame y devuelve un diccionario con los landmarks clave.
+        Procesa un frame y devuelve un objeto PoseResult con:
+        - normalized: Landmarks para dibujo (0.0 a 1.0).
+        - world: Landmarks métricos (metros reales).
         """
         if frame is None:
-            return None
+            return PoseResult(None, None)
 
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
         results = self.pose.process(frame_rgb)
 
         if not results.pose_landmarks:
-            return None
+            return PoseResult(None, None)
 
-        landmarks_dict = {}
-        for lm_id in self.mp_pose.PoseLandmark:
-            lm = results.pose_landmarks.landmark[lm_id]
-            landmarks_dict[lm_id.name] = np.array([lm.x, lm.y, lm.z])
+        norm_dict = {}
+        for i, lm in enumerate(results.pose_landmarks.landmark):
+            name = self.mp_pose.PoseLandmark(i).name
+            norm_dict[name] = np.array([lm.x, lm.y, lm.z, lm.visibility])
 
-        return landmarks_dict
+        world_dict = {}
+        for i, lm in enumerate(results.pose_world_landmarks.landmark):
+            name = self.mp_pose.PoseLandmark(i).name
+            world_dict[name] = np.array([lm.x, lm.y, lm.z, lm.visibility])
+
+        return PoseResult(normalized=norm_dict, world=world_dict)
