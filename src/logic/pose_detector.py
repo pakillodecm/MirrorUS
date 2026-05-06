@@ -2,6 +2,7 @@ import cv2
 import mediapipe as mp
 import numpy as np
 from typing import Dict, NamedTuple, Optional
+from src.logic.filters import OneEuroFilter
 
 
 class PoseResult(NamedTuple):
@@ -25,6 +26,24 @@ class PoseDetector:
             min_detection_confidence=min_detection_confidence,
             min_tracking_confidence=min_tracking_confidence,
         )
+        self.filters_world = {}
+
+    def _filter_dict(self, data_dict, filter_storage):
+        if data_dict is None:
+            return None
+
+        filtered_data = {}
+        for name, coords in data_dict.items():
+            if name not in filter_storage:
+                # min_cutoff: sube si hay mucho ruido quieto (0.5 - 1.5)
+                # beta: sube si notas lag al moverte (0.001 - 0.1)
+                filter_storage[name] = OneEuroFilter(min_cutoff=1.0, beta=0.01)
+
+            # Filtramos solo X, Y, Z. La visibilidad (index 3) no se filtra.
+            xyz_filtered = filter_storage[name].apply(coords[:3])
+            filtered_data[name] = np.array([*xyz_filtered, coords[3]])
+
+        return filtered_data
 
     def extract_landmarks(self, frame: np.ndarray) -> PoseResult:
         """
@@ -51,4 +70,7 @@ class PoseDetector:
             name = self.mp_pose.PoseLandmark(i).name
             world_dict[name] = np.array([lm.x, lm.y, lm.z, lm.visibility])
 
-        return PoseResult(normalized=norm_dict, world=world_dict)
+        raw_result = PoseResult(normalized=norm_dict, world=world_dict)
+        clean_world = self._filter_dict(raw_result.world, self.filters_world)
+
+        return PoseResult(normalized=raw_result.normalized, world=clean_world)
