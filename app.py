@@ -29,11 +29,22 @@ if run:
     # 0 es la cámara por defecto en Windows
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
+    # 1. RESOLUCIÓN Y FPS
+    # Por defecto suele ser 640x360 (4:3). 640x480 (16:9) mejora el aspect ratio.
+    # 1280x720 tiene mucho más detalle pero puede sobrecargar la CPU.
+    # Forzamos 30 FPS. Si la luz es mala, la cámara bajará los FPS para exponer más.
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cap.set(cv2.CAP_PROP_FPS, 30)
+
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             st.error("No se puede acceder a la cámara")
             break
+
+        # 1 -> flip horizontal (efecto espejo), 0 -> flip vertical, -1 -> ambos ejes.
+        frame = cv2.flip(frame, 1)
 
         # Procesamiento
         results = st.session_state.detector.extract_landmarks(frame)
