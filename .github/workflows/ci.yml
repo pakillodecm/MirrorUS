@@ -27,14 +27,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgl1 libusb-1.0-0
 
-      - name: Install Python Dependencies
+      - name: Install Python Dependencies (inc. Dev)
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-          pip install -e .
+          pip install -e ".[dev]"
+          pip install pre-commit
 
       - name: Run Linters (Linting)
         run: pre-commit run --all-files --show-diff-on-failure
 
       - name: Run Tests (Pytest)
-        run: python -m pytest
+        run: |
+          pip install pytest pytest-sugar
+          python -m pytest

@@ -1,21 +1,31 @@
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-
-[project]
+[tool.poetry]
 name = "mirrorus"
-version = "0.1"
-dependencies = [
-    "streamlit>=1.30.0",
-    "mediapipe==0.10.14",
-    "opencv-python>=4.8.0",
-    "numpy<2.0.0",
-    "protobuf==4.25.3,<5",
-    "av"
-]
+version = "0.1.0"
+description = "TFG Pose Tracking"
+authors = ["Francisco de Castro Mañas <frademann@alum.us.es>"]
+readme = "README.md"
+packages = [{include = "src"}]
 
-[tool.setuptools]
-packages = ["src"]
+[tool.poetry.dependencies]
+python = "^3.12"
+streamlit = ">=1.30.0"
+mediapipe = "0.10.14"
+opencv-python = ">=4.8.0"
+numpy = "<2.0.0"
+protobuf = ">=4.25.3,<5"
+av = "*"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-sugar = "^1.0.0"
+pre-commit = "^3.6.0"
+black = "^24.0.0"
+flake8 = "^7.0.0"
+isort = "^5.13.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 line-length = 88
