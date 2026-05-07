@@ -20,27 +20,39 @@ class PoseDetector:
         self,
         static_image_mode: bool = False,  # Por defecto para video
         min_detection_confidence: float = 0.5,
-        min_tracking_confidence: float = 0.5,
+        min_tracking_confidence: float = 0.7,
+        model_complexity: int = 1,  # 0=Rápido, 1=Equilibrado, 2=Pesado
     ):
         self.mp_pose = mp.solutions.pose
         self.mp_drawing = mp.solutions.drawing_utils
         self.mp_drawing_styles = mp.solutions.drawing_styles
+
         self.pose = self.mp_pose.Pose(
             static_image_mode=static_image_mode,
-            model_complexity=1,  # 0=Rápido, 1=Equilibrado, 2=Pesado
+            model_complexity=model_complexity,
+            smooth_landmarks=True,
             min_detection_confidence=min_detection_confidence,
             min_tracking_confidence=min_tracking_confidence,
         )
+
         self.filters_world = {}
 
     def _filter_dict(self, data_dict, filter_storage):
+        """
+        Aplica un filtro de suavizado (OneEuroFilter) a un diccionario de landmarks.
+
+        El filtrado es esencial para evitar que pequeñas vibraciones en la detección
+        generen falsos cambios de estado o ruido en el cálculo de ángulos.
+        """
         if data_dict is None:
             return None
 
         filtered_data = {}
         for name, coords in data_dict.items():
             if name not in filter_storage:
-                filter_storage[name] = OneEuroFilter(min_cutoff=1.0, beta=0.01)
+                # min_cutoff: Reduce el ruido cuando estamos quietos [0.1 - 5.0].
+                # beta: Reduce el retraso cuando nos movemos rápido [0.001 - 0.1].
+                filter_storage[name] = OneEuroFilter(min_cutoff=1.7, beta=0.07)
 
             xyz_filtered = filter_storage[name].apply(coords[:3])
             filtered_data[name] = np.array([*xyz_filtered, coords[3]])
