@@ -6,12 +6,12 @@ build-backend = "setuptools.build_meta"
 name = "mirrorus"
 version = "0.1"
 dependencies = [
-    "streamlit",
-    "mediapipe",
-    "opencv-python",
-    "numpy",
-    "streamlit-webrtc",
-    "av",
+    "streamlit>=1.30.0",
+    "mediapipe==0.10.14",
+    "opencv-python>=4.8.0",
+    "numpy<2.0.0",
+    "protobuf==4.25.3,<5",
+    "av"
 ]
 
 [tool.setuptools]
