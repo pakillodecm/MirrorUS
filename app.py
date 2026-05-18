@@ -75,6 +75,7 @@ if run:
 
         # 1. PROCESAMIENTO (Siempre en el frame original para no perder precisión)
         results = st.session_state.detector.extract_landmarks(frame)
+        count = st.session_state.counter.update(results.world)
 
         # 2. PREPARAR FRAME DE VISUALIZACIÓN (Redimensionar ANTES de dibujar)
         h_orig, w_orig = frame.shape[:2]
@@ -84,34 +85,35 @@ if run:
             frame, (display_w, display_h), interpolation=cv2.INTER_AREA
         )
 
+        h, w = display_h, display_w
+        rect_w, rect_h = int(w * 0.4), 60
+        rect_x = (w // 2) - (rect_w // 2)
+
+        # 3. DIBUJAR CAPA DE CONTROLES BIOMÉTRICOS SI HAY DETECCIÓN
         if results.world:
             angle = st.session_state.counter.last_angle
-            count = st.session_state.counter.update(results.world)
-
             st.session_state.detector.draw_landmarks(frame_display, results.raw)
 
-            # --- UI RELATIVA SOBRE EL FRAME DE DISPLAY (Nitidez máxima) ---
-            h, w = (
-                display_h,
-                display_w,
-            )  # Usamos las dimensiones de la pantalla, no del video
-
+            # --- UI: BARRA DE PROFUNDIDAD (Sincronizada estrictamente con la FSM) ---
             range_angle = u_thr - d_thr
             progress = np.clip((u_thr - angle) / range_angle, 0.0, 1.0)
 
-            # Geometría ajustada a 480p
             bar_w = int(w * 0.08)
             bar_x = int(w * 0.05)
             bar_y_top, bar_y_bottom = int(h * 0.25), int(h * 0.85)
             bar_height = bar_y_bottom - bar_y_top
 
-            color = (
-                (0, 0, 255)
-                if progress < 0.5
-                else (0, 255, 255) if progress < 0.9 else (0, 255, 0)
-            )
+            # El color obedece al estado interno real de la máquina de estados
+            actual_state = st.session_state.counter.state
 
-            # Dibujo de la barra
+            if actual_state == 2:
+                color = (0, 255, 0)  # Verde: ESTÁS ABAJO (Profundidad válida)
+            elif actual_state in [1, 3]:
+                color = (0, 255, 255)  # Amarillo: En movimiento
+            else:
+                color = (0, 0, 255)  # Rojo: De pie / Reposo (Estado 0)
+
+            # Dibujo del contenedor y el nivel de la barra
             cv2.rectangle(
                 frame_display,
                 (bar_x, bar_y_top),
@@ -140,30 +142,27 @@ if run:
                 cv2.LINE_AA,
             )
 
-            # --- UI: REPS (CENTRO ARRIBA) ---
-            rect_w, rect_h = int(w * 0.4), 60
-            rect_x = (w // 2) - (rect_w // 2)
-            cv2.rectangle(
-                frame_display,
-                (rect_x, 10),
-                (rect_x + rect_w, 10 + rect_h),
-                (0, 0, 0),
-                -1,
-            )
-
-            rep_color = (
-                (0, 255, 0) if st.session_state.counter.state == 2 else (0, 255, 255)
-            )
-            cv2.putText(
-                frame_display,
-                f"REPS: {count}",
-                (rect_x + 20, 10 + 45),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.2,
-                rep_color,
-                3,
-                cv2.LINE_AA,
-            )
+        # 4. UI: CONTADOR DE REPETICIONES
+        cv2.rectangle(
+            frame_display,
+            (rect_x, 10),
+            (rect_x + rect_w, 10 + rect_h),
+            (0, 0, 0),
+            -1,
+        )
+        rep_color = (
+            (0, 255, 0) if st.session_state.counter.state == 2 else (0, 255, 255)
+        )
+        cv2.putText(
+            frame_display,
+            f"REPS: {count}",
+            (rect_x + 20, 10 + 45),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.1,
+            rep_color,
+            3,
+            cv2.LINE_AA,
+        )
 
         frame_placeholder.image(frame_display, channels="BGR", width="stretch")
 
