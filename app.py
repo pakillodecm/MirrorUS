@@ -1,5 +1,4 @@
 import os
-import tempfile
 import time
 import warnings
 
@@ -42,11 +41,9 @@ with st.sidebar:
         video_file = st.file_uploader("Sube un vídeo", type=["mp4", "mov", "avi"])
         if video_file:
             _, file_extension = os.path.splitext(video_file.name)
-            with tempfile.NamedTemporaryFile(
-                delete=False, suffix=file_extension
-            ) as tfile:
-                tfile.write(video_file.read())
-                input_path = tfile.name
+            input_path = f"./temp_debug_video{file_extension}"
+            with open(input_path, "wb") as f:
+                f.write(video_file.read())
             do_flip = False
         else:
             st.warning("Sube un vídeo para continuar.")
