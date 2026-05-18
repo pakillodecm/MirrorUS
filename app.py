@@ -1,10 +1,14 @@
+import os
+import tempfile
+
 import cv2
+import numpy as np
 import streamlit as st
 
 from src.logic.pose_detector import PoseDetector
 from src.logic.squat_counter import SquatCounter
 
-# Configuración inicial
+# 1. CONFIGURACIÓN DE PÁGINA
 st.set_page_config(page_title="MirrorUS", layout="centered")
 
 if "detector" not in st.session_state:
@@ -14,9 +18,29 @@ if "counter" not in st.session_state:
 
 st.title("🏋️‍♂️ MirrorUS")
 
-# Sidebar para ajustes
+# --- SIDEBAR ---
 with st.sidebar:
-    st.header("Ajustes")
+    st.header("⚙️ Configuración")
+    source_mode = st.radio(
+        "Fuente de entrada:", ["Cámara en vivo", "Archivo de vídeo (Debug)"]
+    )
+
+    input_path = 0
+    do_flip = True
+
+    if source_mode == "Archivo de vídeo (Debug)":
+        video_file = st.file_uploader("Sube un vídeo", type=["mp4", "gif", "avi"])
+        if video_file:
+            tfile = tempfile.NamedTemporaryFile(delete=False)
+            tfile.write(video_file.read())
+            input_path = tfile.name
+            do_flip = False
+        else:
+            st.warning("Sube un vídeo para continuar.")
+            st.stop()
+
+    st.divider()
+    st.subheader("Umbrales")
     d_thr = st.slider("Umbral Profundidad", 60, 110, 90)
     u_thr = st.slider("Umbral Erguido", 140, 180, 160)
 
@@ -24,65 +48,132 @@ with st.sidebar:
     st.session_state.counter.thr_down = d_thr
     st.session_state.counter.thr_up = u_thr
 
-run = st.checkbox("🔥 Iniciar Cámara")
+run = st.checkbox("🔥 Iniciar Seguimiento")
 frame_placeholder = st.empty()
 
 if run:
-    # CAP_DSHOW es vital en Windows para evitar latencia de inicio
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    backend = cv2.CAP_DSHOW if source_mode == "Cámara en vivo" else cv2.CAP_ANY
+    cap = cv2.VideoCapture(input_path, backend)
 
-    # 1. RESOLUCIÓN Y FPS
-    # Por defecto suele ser 640x480 (4:3). 640x360 (16:9) mejora el aspect ratio.
-    # 1280x720 tiene mucho más detalle pero puede sobrecargar la CPU.
-    # Forzamos 30 FPS. Si la luz es mala, la cámara bajará los FPS para exponer más.
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-    cap.set(cv2.CAP_PROP_FPS, 30)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    if source_mode == "Cámara en vivo":
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        cap.set(cv2.CAP_PROP_FPS, 30)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     while run:
         ret, frame = cap.read()
         if not ret:
-            st.error("No se puede acceder a la cámara")
+            if source_mode == "Archivo de vídeo (Debug)":
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                continue
             break
 
-        # 1 -> flip horizontal (efecto espejo), 0 -> flip vertical, -1 -> ambos ejes.
-        frame = cv2.flip(frame, 1)
+        if do_flip:
+            # 1 -> flip horizontal (efecto espejo), 0 -> flip vertical, -1 -> ambos ejes
+            frame = cv2.flip(frame, 1)
 
-        # Procesamiento
+        # 1. PROCESAMIENTO (Siempre en el frame original para no perder precisión)
         results = st.session_state.detector.extract_landmarks(frame)
+        count = st.session_state.counter.update(results.world)
 
+        # 2. PREPARAR FRAME DE VISUALIZACIÓN (Redimensionar ANTES de dibujar)
+        h_orig, w_orig = frame.shape[:2]
+        display_h = 480
+        display_w = int(display_h * (w_orig / h_orig))
+        frame_display = cv2.resize(
+            frame, (display_w, display_h), interpolation=cv2.INTER_AREA
+        )
+
+        h, w = display_h, display_w
+        rect_w, rect_h = int(w * 0.4), 60
+        rect_x = (w // 2) - (rect_w // 2)
+
+        # 3. DIBUJAR CAPA DE CONTROLES BIOMÉTRICOS SI HAY DETECCIÓN
         if results.world:
-            count = st.session_state.counter.update(results.world)
-            st.session_state.detector.draw_landmarks(frame, results.raw)
+            angle = st.session_state.counter.last_angle
+            st.session_state.detector.draw_landmarks(frame_display, results.raw)
 
-            # UI sobre el vídeo (Cálculos en el frame original)
-            cv2.rectangle(frame, (30, 15), (380, 105), (0, 0, 0), -1)
+            # --- UI: BARRA DE PROFUNDIDAD (Sincronizada estrictamente con la FSM) ---
+            range_angle = u_thr - d_thr
+            progress = np.clip((u_thr - angle) / range_angle, 0.0, 1.0)
+
+            bar_w = int(w * 0.08)
+            bar_x = int(w * 0.05)
+            bar_y_top, bar_y_bottom = int(h * 0.25), int(h * 0.85)
+            bar_height = bar_y_bottom - bar_y_top
+
+            # El color obedece al estado interno real de la máquina de estados
+            actual_state = st.session_state.counter.state
+
+            if actual_state == 2:
+                color = (0, 255, 0)  # Verde: ESTÁS ABAJO (Profundidad válida)
+            elif actual_state in [1, 3]:
+                color = (0, 255, 255)  # Amarillo: En movimiento
+            else:
+                color = (0, 0, 255)  # Rojo: De pie / Reposo (Estado 0)
+
+            # Dibujo del contenedor y el nivel de la barra
+            cv2.rectangle(
+                frame_display,
+                (bar_x, bar_y_top),
+                (bar_x + bar_w, bar_y_bottom),
+                (40, 40, 40),
+                -1,
+            )
+            fill_level = int(bar_y_bottom - (progress * bar_height))
+            cv2.rectangle(
+                frame_display,
+                (bar_x, fill_level),
+                (bar_x + bar_w, bar_y_bottom),
+                color,
+                -1,
+            )
+
+            # Texto nítido (fontScale fijo porque la altura siempre es 480)
             cv2.putText(
-                frame,
-                f"REPS: {count}",
-                (50, 80),
+                frame_display,
+                f"{int(progress * 100)}%",
+                (bar_x, bar_y_top - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                color,
                 2,
-                (0, 255, 255),
-                6,
                 cv2.LINE_AA,
             )
 
-        # --- EL TRUCO DE INGENIERÍA ---
-        # Redimensionamos a 480p para que Streamlit lo renderice fluido
-        # pero la IA ha trabajado con la calidad de 720p.
-        frame_display = cv2.resize(frame, (640, 360))
+        # 4. UI: CONTADOR DE REPETICIONES
+        cv2.rectangle(
+            frame_display,
+            (rect_x, 10),
+            (rect_x + rect_w, 10 + rect_h),
+            (0, 0, 0),
+            -1,
+        )
+        rep_color = (
+            (0, 255, 0) if st.session_state.counter.state == 2 else (0, 255, 255)
+        )
+        cv2.putText(
+            frame_display,
+            f"REPS: {count}",
+            (rect_x + 20, 10 + 45),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.1,
+            rep_color,
+            3,
+            cv2.LINE_AA,
+        )
 
-        # Mostrar en Streamlit
-        frame_placeholder.image(frame_display, channels="BGR", use_container_width=True)
+        frame_placeholder.image(frame_display, channels="BGR", width="stretch")
 
-        # Para poder frenar el bucle al desmarcar el checkbox
-        # Streamlit no refresca los widgets dentro de un while de forma nativa,
-        # pero este es el flujo que tenías definido.
         if not run:
             break
 
     cap.release()
+    if source_mode == "Archivo de vídeo (Debug)" and os.path.exists(input_path):
+        try:
+            os.remove(input_path)
+        except Exception:
+            pass
 else:
-    st.info("Activa el checkbox para empezar.")
+    st.info("Configura la fuente y activa el checkbox para empezar.")
