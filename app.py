@@ -42,12 +42,19 @@ frame_placeholder = st.empty()
 # 2. CONTROLADOR DE FLUJO (ORQUESTADOR ADAPTATIVO)
 if run:
     backend = cv2.CAP_DSHOW if source_mode == "Cámara en vivo" else cv2.CAP_ANY
-    cap = cv2.VideoCapture(input_path, backend)
+
+    # Inicializamos el hardware una sola vez en el estado de la sesión
+    if "cap" not in st.session_state:
+        st.session_state.cap = cv2.VideoCapture(input_path, backend)
+        if source_mode == "Cámara en vivo":
+            st.session_state.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            st.session_state.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            st.session_state.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    # Extraemos el puntero persistente de la cámara/vídeo
+    cap = st.session_state.cap
 
     if source_mode == "Cámara en vivo":
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         loop_delay = 0.01
     else:
         video_fps = cap.get(cv2.CAP_PROP_FPS)
@@ -190,8 +197,15 @@ if run:
         elapsed = time.time() - start_time
         time.sleep(max(0.001, loop_delay - elapsed))
 
+    # Limpieza si el vídeo termina de forma natural
     cap.release()
+    if "cap" in st.session_state:
+        del st.session_state.cap
     handle_video_cleanup(input_path)
 else:
+    # LIMPIEZA TOTAL: al desactivar el checkbox, liberamos la cámara inmediatamente
+    if "cap" in st.session_state:
+        st.session_state.cap.release()
+        del st.session_state.cap
     handle_video_cleanup(input_path)
     st.info("Activa el checkbox superior para poner en marcha el detector de pose.")
