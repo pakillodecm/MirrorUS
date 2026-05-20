@@ -21,7 +21,7 @@ class PoseDetector:
         static_image_mode: bool = False,  # Por defecto para video
         min_detection_confidence: float = 0.5,
         min_tracking_confidence: float = 0.7,
-        model_complexity: int = 1,  # 0=Rápido, 1=Equilibrado, 2=Pesado
+        model_complexity: int = 0,  # 0=Rápido, 1=Equilibrado, 2=Pesado
     ):
         self.mp_pose = mp.solutions.pose
         self.mp_drawing = mp.solutions.drawing_utils
@@ -30,7 +30,7 @@ class PoseDetector:
         self.pose = self.mp_pose.Pose(
             static_image_mode=static_image_mode,
             model_complexity=model_complexity,
-            smooth_landmarks=True,
+            smooth_landmarks=False,  # Elimina el doble filtrado redundante
             min_detection_confidence=min_detection_confidence,
             min_tracking_confidence=min_tracking_confidence,
         )
@@ -52,7 +52,7 @@ class PoseDetector:
             if name not in filter_storage:
                 # min_cutoff: Reduce el ruido cuando estamos quietos [0.1 - 5.0].
                 # beta: Reduce el retraso cuando nos movemos rápido [0.001 - 0.1].
-                filter_storage[name] = OneEuroFilter(min_cutoff=1.7, beta=0.07)
+                filter_storage[name] = OneEuroFilter(min_cutoff=0.8, beta=0.05)
 
             xyz_filtered = filter_storage[name].apply(coords[:3])
             filtered_data[name] = np.array([*xyz_filtered, coords[3]])

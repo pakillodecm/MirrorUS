@@ -1,66 +1,45 @@
-import os
 import time
-import warnings
+import uuid
 
 import cv2
 import numpy as np
 import streamlit as st
 
+# --- COMPONENTES ARQUITECTÓNICOS ---
 from src.logic.pose_detector import PoseDetector
 from src.logic.squat_counter import SquatCounter
-
-# --- SILENCIAR LOGS Y AVISOS DE CONSOLA ---
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-os.environ["ABSL_LOGGING_LEVEL"] = "3"
-warnings.filterwarnings(
-    "ignore", category=UserWarning, module="google.protobuf.symbol_database"
+from src.ui.components import (
+    detect_runtime_env,
+    handle_video_cleanup,
+    render_header_and_instructions,
+    render_sidebar_config,
 )
-warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-# 1. CONFIGURACIÓN DE PÁGINA
+# 1. CONFIGURACIÓN E INICIALIZACIÓN PERSISTENTE
 st.set_page_config(page_title="MirrorUS", layout="centered")
 
 if "detector" not in st.session_state:
     st.session_state.detector = PoseDetector()
 if "counter" not in st.session_state:
     st.session_state.counter = SquatCounter()
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())[:8]
+if "last_valid_results" not in st.session_state:
+    st.session_state.last_valid_results = None
 
-st.title("🏋️‍♂️ MirrorUS")
+is_local = detect_runtime_env()
 
-# --- SIDEBAR: CONFIGURACIÓN Y DEBUG ---
 with st.sidebar:
-    st.header("⚙️ Configuración")
-    source_mode = st.radio(
-        "Fuente de entrada:", ["Cámara en vivo", "Archivo de vídeo (Debug)"]
+    source_mode, input_path, do_flip, skip_mode = render_sidebar_config(
+        is_local, st.session_state.session_id
     )
 
-    input_path = 0
-    do_flip = True
-
-    if source_mode == "Archivo de vídeo (Debug)":
-        video_file = st.file_uploader("Sube un vídeo", type=["mp4", "mov", "avi"])
-        if video_file:
-            _, file_extension = os.path.splitext(video_file.name)
-            input_path = f"./temp_debug_video{file_extension}"
-            with open(input_path, "wb") as f:
-                f.write(video_file.read())
-            do_flip = False
-        else:
-            st.warning("Sube un vídeo para continuar.")
-            st.stop()
-
-    st.divider()
-    st.subheader("Umbrales")
-    d_thr = st.slider("Umbral Profundidad", 60, 110, 90)
-    u_thr = st.slider("Umbral Erguido", 140, 180, 160)
-
-    st.session_state.counter.thr_down = d_thr
-    st.session_state.counter.thr_up = u_thr
+render_header_and_instructions(is_local, source_mode)
 
 run = st.checkbox("🔥 Iniciar Seguimiento")
 frame_placeholder = st.empty()
 
-# --- LÓGICA DE EJECUCIÓN ---
+# 2. CONTROLADOR DE FLUJO (ORQUESTADOR ADAPTATIVO)
 if run:
     backend = cv2.CAP_DSHOW if source_mode == "Cámara en vivo" else cv2.CAP_ANY
     cap = cv2.VideoCapture(input_path, backend)
@@ -68,25 +47,24 @@ if run:
     if source_mode == "Cámara en vivo":
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-        cap.set(cv2.CAP_PROP_FPS, 30)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        loop_delay = 1.0 / 30.0
+        loop_delay = 0.01
     else:
-        # Calcular delay real basado en los FPS del vídeo
         video_fps = cap.get(cv2.CAP_PROP_FPS)
         if video_fps <= 0 or np.isnan(video_fps):
             video_fps = 30.0
         loop_delay = 1.0 / video_fps
 
+    frame_idx = 0  # Inicializador de fotogramas secuenciales
+
     while run:
+        start_time = time.time()  # Ancla de tiempo para compensación dinámica
+
         ret, frame = cap.read()
         if not ret:
             if source_mode == "Archivo de vídeo (Debug)":
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                ret, frame = cap.read()
-                if not ret:
-                    st.error("Error crítico: No se puede leer el archivo de vídeo.")
-                    break
+                continue
             else:
                 break
 
@@ -94,11 +72,30 @@ if run:
             # 1 -> flip horizontal (efecto espejo), 0 -> flip vertical, -1 -> ambos ejes
             frame = cv2.flip(frame, 1)
 
-        # 1. PROCESAMIENTO GENERAL
-        results = st.session_state.detector.extract_landmarks(frame)
+        # 2.1 Algoritmo Adaptativo de Salto de Frames (Variable Frame Scheduler)
+        should_skip = False
+        if skip_mode == "Equilibrado (66% IA)":
+            if frame_idx % 3 == 2:  # Patrón 1 1 0 1 1 0
+                should_skip = True
+        elif skip_mode == "Máximo Rendimiento (50% IA)":
+            if frame_idx % 2 == 1:  # Patrón 1 0 1 0 1 0
+                should_skip = True
+
+        # 2.2 Gestión de Inferencia vs Retención de Orden Cero (Zero-Order Hold)
+        if not should_skip:
+            results = st.session_state.detector.extract_landmarks(frame)
+            st.session_state.last_valid_results = results
+        else:
+            results = st.session_state.last_valid_results
+            if results is None:
+                # Inferencia de rescate obligatoria si el primer frame requiere skip
+                results = st.session_state.detector.extract_landmarks(frame)
+                st.session_state.last_valid_results = results
+
+        # La FSM se alimenta de la postura persistida para no perder continuidad
         count = st.session_state.counter.update(results.world)
 
-        # 2. PREPARAR FRAME DE VISUALIZACIÓN
+        # 2.3 Preparación del frame de visualización
         h_orig, w_orig = frame.shape[:2]
         display_h = 480
         display_w = int(display_h * (w_orig / h_orig))
@@ -110,7 +107,10 @@ if run:
         rect_w, rect_h = int(w * 0.4), 60
         rect_x = (w // 2) - (rect_w // 2)
 
-        # 3. DIBUJAR CAPA DE CONTROLES BIOMÉTRICOS SI HAY DETECCIÓN
+        d_thr = st.session_state.counter.thr_down
+        u_thr = st.session_state.counter.thr_up
+
+        # 2.4 Pintar Capas Gráficas Recuperadas
         if results.world:
             angle = st.session_state.counter.last_angle
             st.session_state.detector.draw_landmarks(frame_display, results.raw)
@@ -131,6 +131,7 @@ if run:
             else:
                 color = (0, 0, 255)  # Rojo: Bloqueo/Reposo
 
+            # Fondo gris de la barra
             cv2.rectangle(
                 frame_display,
                 (bar_x, bar_y_top),
@@ -138,6 +139,7 @@ if run:
                 (40, 40, 40),
                 -1,
             )
+            # Relleno dinámico proporcional
             fill_level = int(bar_y_bottom - (progress * bar_height))
             cv2.rectangle(
                 frame_display,
@@ -146,7 +148,7 @@ if run:
                 color,
                 -1,
             )
-
+            # Texto porcentual
             cv2.putText(
                 frame_display,
                 f"{int(progress * 100)}%",
@@ -158,7 +160,7 @@ if run:
                 cv2.LINE_AA,
             )
 
-        # 4. UI: CONTADOR DE REPETICIONES PERSISTENTE
+        # --- UI: CONTADOR DE REPETICIONES PERSISTENTE ---
         cv2.rectangle(
             frame_display,
             (rect_x, 10),
@@ -180,22 +182,16 @@ if run:
             cv2.LINE_AA,
         )
 
-        # Enviar el frame a Streamlit
         frame_placeholder.image(frame_display, channels="BGR", width="stretch")
 
-        # Delay imperativo de flujo para estabilización en la nube
-        time.sleep(loop_delay)
+        frame_idx += 1  # Incremento de control indexado
 
-        if not run:
-            break
+        # 2.5 Reloj de Compensación Dinámica (Evita la cámara lenta)
+        elapsed = time.time() - start_time
+        time.sleep(max(0.001, loop_delay - elapsed))
 
     cap.release()
-    if source_mode == "Archivo de vídeo (Debug)" and os.path.exists(input_path):
-        try:
-            os.remove(input_path)
-        except Exception:
-            pass
+    handle_video_cleanup(input_path)
 else:
-    st.info(
-        "Configura la fuente en el panel izquierdo y activa el checkbox para empezar."
-    )
+    handle_video_cleanup(input_path)
+    st.info("Activa el checkbox superior para poner en marcha el detector de pose.")
