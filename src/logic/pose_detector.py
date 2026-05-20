@@ -21,7 +21,7 @@ class PoseDetector:
         static_image_mode: bool = False,  # Por defecto para video
         min_detection_confidence: float = 0.5,
         min_tracking_confidence: float = 0.7,
-        model_complexity: int = 0,  # 0=Rápido, 1=Equilibrado, 2=Pesado
+        model_complexity: int = 1,  # 0=Rápido, 1=Equilibrado, 2=Pesado
     ):
         self.mp_pose = mp.solutions.pose
         self.mp_drawing = mp.solutions.drawing_utils
