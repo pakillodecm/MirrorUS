@@ -36,14 +36,37 @@ with st.sidebar:
 
 render_header_and_instructions(is_local, source_mode)
 
-run = st.checkbox("🔥 Iniciar Seguimiento")
+# --- SENSOR DE MUTACIÓN ADAPTATIVO ---
+if "prev_source" not in st.session_state:
+    st.session_state.prev_source = source_mode
+if "prev_path" not in st.session_state:
+    st.session_state.prev_path = input_path
+
+# Si el usuario cambia la radio o sube otro vídeo, se activa el protocolo de apagado
+if (
+    source_mode != st.session_state.prev_source
+    or input_path != st.session_state.prev_path
+):
+    st.session_state.run_btn = False  # Forzamos el apagado del checkbox en la memoria
+
+    if "cap" in st.session_state:
+        st.session_state.cap.release()
+        del st.session_state.cap
+    st.session_state.last_valid_results = None
+
+    # Sincronizamos el histórico para el próximo ciclo
+    st.session_state.prev_source = source_mode
+    st.session_state.prev_path = input_path
+    st.rerun()  # Reinicio inmediato para reflejar el apagado visual
+
+# Vinculamos el checkbox a la clave controlada por nuestro sensor de mutación
+run = st.checkbox("🔥 Iniciar Seguimiento", key="run_btn")
 frame_placeholder = st.empty()
 
-# 2. CONTROLADOR DE FLUJO (ORQUESTADOR ADAPTATIVO)
+# 2. CONTROLADOR DE FLUJO (ORQUESTADOR ESTABLE CON AUTO-RESET)
 if run:
     backend = cv2.CAP_DSHOW if source_mode == "Cámara en vivo" else cv2.CAP_ANY
 
-    # Inicializamos el hardware una sola vez en el estado de la sesión
     if "cap" not in st.session_state:
         st.session_state.cap = cv2.VideoCapture(input_path, backend)
         if source_mode == "Cámara en vivo":
@@ -51,7 +74,6 @@ if run:
             st.session_state.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
             st.session_state.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-    # Extraemos el puntero persistente de la cámara/vídeo
     cap = st.session_state.cap
 
     if source_mode == "Cámara en vivo":
@@ -79,7 +101,7 @@ if run:
             # 1 -> flip horizontal (efecto espejo), 0 -> flip vertical, -1 -> ambos ejes
             frame = cv2.flip(frame, 1)
 
-        # 2.1 Algoritmo Adaptativo de Salto de Frames (Variable Frame Scheduler)
+        # 2.1 Algoritmo Adaptativo de Salto de Frames
         should_skip = False
         if skip_mode == "Equilibrado (66% IA)":
             if frame_idx % 3 == 2:  # Patrón 1 1 0 1 1 0
@@ -117,7 +139,7 @@ if run:
         d_thr = st.session_state.counter.thr_down
         u_thr = st.session_state.counter.thr_up
 
-        # 2.4 Pintar Capas Gráficas Recuperadas
+        # 2.4 Pintar Capas Gráficas
         if results.world:
             angle = st.session_state.counter.last_angle
             st.session_state.detector.draw_landmarks(frame_display, results.raw)
@@ -197,13 +219,11 @@ if run:
         elapsed = time.time() - start_time
         time.sleep(max(0.001, loop_delay - elapsed))
 
-    # Limpieza si el vídeo termina de forma natural
     cap.release()
     if "cap" in st.session_state:
         del st.session_state.cap
     handle_video_cleanup(input_path)
 else:
-    # LIMPIEZA TOTAL: al desactivar el checkbox, liberamos la cámara inmediatamente
     if "cap" in st.session_state:
         st.session_state.cap.release()
         del st.session_state.cap
