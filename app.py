@@ -85,14 +85,21 @@ if run:
         loop_delay = 1.0 / video_fps
 
     frame_idx = 0  # Inicializador de fotogramas secuenciales
+    video_start_time = None  # Ancla de tiempo absoluto de reproducción
 
     while run:
         start_time = time.time()  # Ancla de tiempo para compensación dinámica
+
+        # Inicialización del reloj absoluto en el primer fotograma real
+        if frame_idx == 0 and source_mode != "Cámara en vivo":
+            video_start_time = time.time()
 
         ret, frame = cap.read()
         if not ret:
             if source_mode == "Archivo de vídeo (Debug)":
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                frame_idx = 0
+                video_start_time = time.time()
                 continue
             else:
                 break
@@ -216,8 +223,24 @@ if run:
         frame_idx += 1  # Incremento de control indexado
 
         # 2.5 Reloj de Compensación Dinámica (Evita la cámara lenta)
-        elapsed = time.time() - start_time
-        time.sleep(max(0.001, loop_delay - elapsed))
+        if source_mode == "Cámara en vivo":
+            elapsed = time.time() - start_time
+            time.sleep(max(0.001, loop_delay - elapsed))
+        elif source_mode == "Archivo de vídeo (Debug)":
+            # Cálculo de la línea temporal absoluta para fulminar la deriva acumulada
+            expected_timeline = frame_idx * loop_delay
+            actual_timeline = time.time() - video_start_time
+
+            if actual_timeline > expected_timeline:
+                # El sistema va lento: calculamos la ráfaga exacta de frames a descartar
+                frames_to_skip = int((actual_timeline - expected_timeline) / loop_delay)
+                if frames_to_skip > 0:
+                    for _ in range(frames_to_skip):
+                        cap.grab()
+                    frame_idx += frames_to_skip
+            else:
+                # El sistema va adelantado: dormimos el residuo exacto del reloj
+                time.sleep(max(0.001, expected_timeline - actual_timeline))
 
     cap.release()
     if "cap" in st.session_state:

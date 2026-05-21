@@ -1,3 +1,4 @@
+import hashlib
 import os
 
 import streamlit as st
@@ -48,7 +49,9 @@ def render_sidebar_config(is_local: bool, session_id: str):
         )
         if video_file:
             _, file_extension = os.path.splitext(video_file.name)
-            input_path = f"./temp_demo_{session_id}{file_extension}"
+
+            file_signature = hashlib.md5(video_file.name.encode()).hexdigest()[:6]
+            input_path = f"./temp_demo_{session_id}_{file_signature}{file_extension}"
 
             if not os.path.exists(input_path):
                 with open(input_path, "wb") as f:
