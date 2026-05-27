@@ -1,4 +1,3 @@
-import hashlib
 import os
 
 import streamlit as st
@@ -24,7 +23,7 @@ def render_sidebar_config(is_local: bool, session_id: str):
         session_id (str): Identificador único de la sesión actual.
 
     Returns:
-        tuple: (source_mode, input_path, do_flip, skip_mode)
+        tuple: (source_mode, skip_mode)
     """
     st.header("⚙️ Configuración")
 
@@ -39,28 +38,6 @@ def render_sidebar_config(is_local: bool, session_id: str):
         )
 
     source_mode = st.radio("Fuente de entrada:", options, index=index)
-
-    input_path = 0
-    do_flip = True
-
-    if source_mode == "Archivo de vídeo (Debug)":
-        video_file = st.file_uploader(
-            "Sube un vídeo de tu sentadilla", type=["mp4", "mov", "avi"]
-        )
-        if video_file:
-            _, file_extension = os.path.splitext(video_file.name)
-
-            file_signature = hashlib.md5(video_file.name.encode()).hexdigest()[:6]
-            input_path = f"./temp_demo_{session_id}_{file_signature}{file_extension}"
-
-            if not os.path.exists(input_path):
-                with open(input_path, "wb") as f:
-                    f.write(video_file.read())
-
-            do_flip = False
-        else:
-            st.warning("Por favor, sube un archivo de vídeo para continuar.")
-            st.stop()
 
     st.divider()
     st.subheader("⚡ Optimización de Rendimiento")
@@ -83,7 +60,7 @@ def render_sidebar_config(is_local: bool, session_id: str):
     st.session_state.counter.thr_down = d_thr
     st.session_state.counter.thr_up = u_thr
 
-    return source_mode, input_path, do_flip, skip_mode
+    return source_mode, skip_mode
 
 
 def render_header_and_instructions(is_local: bool, source_mode: str):
