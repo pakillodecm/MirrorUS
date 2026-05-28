@@ -16,13 +16,8 @@ def create_frame_data(
     ankle = np.array([-knee_w / 2.0, 0.0, 0.0, vis])
     knee = np.array([-knee_w / 2.0, 0.5, 0.0, vis])
 
-    # dx es la diferencia de desplazamiento lateral entre cadera y rodilla
     dx = (-hip_w / 2.0) - (-knee_w / 2.0)
-
-    # dy se calcula estrictamente a partir del plano sagital esperado
     dy = -0.5 * np.cos(np.deg2rad(angle_deg))
-
-    # dz absorbe el remanente geométrico para mantener la palanca en 0.5 metros
     base_z = 0.25 * (np.sin(np.deg2rad(angle_deg)) ** 2) - (dx**2)
     dz = np.sqrt(max(0.0, base_z))
 
@@ -88,13 +83,66 @@ def test_analyzer_failed_lifecycle_with_valgus():
     analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40))  # DESCENDING
     analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40))  # DEEP
 
-    # Colapso de rodillas en fase de subida: rodillas se cierran a 30cm (Ratio < 0.90)
     payload = analyzer.process_frame(create_frame_data(120.0, 0.40, 0.30))  # ASCENDING
     assert payload["current_frame_errors"]["KNEE_VALGUS"] is True
 
-    # El atleta se pone de pie -> Se cierra el ciclo como inválida
     payload = analyzer.process_frame(create_frame_data(160.0, 0.40, 0.40))  # STAND
     assert payload["rep_valid_count"] == 0
     assert payload["rep_invalid_count"] == 1
     assert payload["session_history"][-1]["valid"] is False
     assert "KNEE_VALGUS" in payload["session_history"][-1]["errors"]
+
+
+def test_analyzer_aborted_squat_no_depth():
+    """Verifica que una bajada parcial sea interceptada por 'NO_DEPTH'."""
+    depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
+    valgus = KneeValgusDetector(threshold=0.90)
+    analyzer = SquatAnalyzer(
+        depth_detector=depth, detectors={"KNEE_VALGUS": valgus}, hysteresis=5.0
+    )
+
+    analyzer.process_frame(create_frame_data(170.0, 0.40, 0.40))
+    payload = analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40))
+    assert payload["fsm_state"] == 1
+
+    payload = analyzer.process_frame(create_frame_data(105.0, 0.40, 0.40))
+    assert payload["fsm_state"] == 1
+
+    payload = analyzer.process_frame(create_frame_data(160.0, 0.40, 0.40))
+    assert payload["fsm_state"] == 0
+    assert payload["rep_valid_count"] == 0
+    assert payload["rep_invalid_count"] == 1
+    assert payload["session_history"][-1]["valid"] is False
+    assert "NO_DEPTH" in payload["session_history"][-1]["errors"]
+
+
+def test_analyzer_ascent_collapse():
+    """Verifica que si el atleta vuelve a caer durante la subida, la FSM lo
+
+    degrade a la zona profunda y registre el fallo 'MID_ASCENT_COLLAPSE'.
+    """
+    depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
+    valgus = KneeValgusDetector(threshold=0.90)
+    analyzer = SquatAnalyzer(
+        depth_detector=depth, detectors={"KNEE_VALGUS": valgus}, hysteresis=5.0
+    )
+
+    analyzer.process_frame(create_frame_data(170.0, 0.40, 0.40))  # STAND
+    analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40))  # DESCENDING
+    analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40))  # DEEP
+
+    payload = analyzer.process_frame(create_frame_data(120.0, 0.40, 0.40))
+    assert payload["fsm_state"] == 3
+
+    payload = analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40))
+    assert payload["fsm_state"] == 2
+
+    payload = analyzer.process_frame(create_frame_data(120.0, 0.40, 0.40))
+    assert payload["fsm_state"] == 3
+
+    payload = analyzer.process_frame(create_frame_data(160.0, 0.40, 0.40))
+    assert payload["fsm_state"] == 0
+    assert payload["rep_valid_count"] == 0
+    assert payload["rep_invalid_count"] == 1
+    assert payload["session_history"][-1]["valid"] is False
+    assert "MID_ASCENT_COLLAPSE" in payload["session_history"][-1]["errors"]

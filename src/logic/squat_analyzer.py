@@ -57,6 +57,7 @@ class SquatAnalyzer:
         Returns:
             dict: Payload estructurado genérico para el frontend.
         """
+        # 1. Consulta analítica a los sensores geométricos instantáneos
         is_deep, angle = self.depth_detector.analyze(world_landmarks)
 
         frame_errors = {}
@@ -73,6 +74,7 @@ class SquatAnalyzer:
                 if name == "KNEE_VALGUS":
                     metrics["valgus_ratio"] = 1.0
 
+        # 2. Motor de transiciones de la FSM Plenamente Bidireccional por Umbrales
         old_state = self.state
         state_changed = True
         while state_changed:
@@ -85,6 +87,9 @@ class SquatAnalyzer:
             elif self.state == 1 and is_deep:
                 self.state = 2
                 state_changed = True
+            elif self.state == 1 and angle >= self.depth_detector.up_threshold:
+                self.state = 0
+                state_changed = True
             elif self.state == 2 and angle > (
                 self.depth_detector.down_threshold + self.hysteresis
             ):
@@ -93,24 +98,36 @@ class SquatAnalyzer:
             elif self.state == 3 and angle >= self.depth_detector.up_threshold:
                 self.state = 0
                 state_changed = True
+            elif self.state == 3 and angle <= self.depth_detector.down_threshold:
+                # Flecha de degradación: pérdida de control motor durante la subida
+                self.state = 1
+                self.current_rep_errors.add("MID_ASCENT_COLLAPSE")
+                state_changed = True
 
+        # 3. Inicialización del contenedor de fallos al romper la posición de reposo
         if old_state == 0 and self.state == 1:
             self.current_rep_errors = set()
 
-        if self.state in [2, 3]:
+        # Captura continua de anomalías posturales en cualquier fase del movimiento
+        if self.state in [1, 2, 3]:
             for name, is_active in frame_errors.items():
                 if is_active:
                     self.current_rep_errors.add(name)
 
-        if old_state == 3 and self.state == 0:
+        # 4. Gestión unificada de cierre de ciclo de vida (Normal o Abortado)
+        if (old_state == 3 and self.state == 0) or (old_state == 1 and self.state == 0):
             rep_idx = len(self.history) + 1
+
+            if old_state == 1:
+                self.current_rep_errors.add("NO_DEPTH")
+
             if self.current_rep_errors:
                 self.count_invalid += 1
                 self.history.append(
                     {
                         "rep": rep_idx,
                         "valid": False,
-                        "errors": list(self.current_rep_errors),
+                        "errors": sorted(list(self.current_rep_errors)),
                     }
                 )
             else:
@@ -118,6 +135,7 @@ class SquatAnalyzer:
                 self.history.append({"rep": rep_idx, "valid": True, "errors": []})
             self.current_rep_errors = set()
 
+        # 5. Retorno del contrato genérico inalterado
         return {
             "rep_valid_count": self.count_valid,
             "rep_invalid_count": self.count_invalid,
