@@ -11,6 +11,7 @@ import streamlit as st
 # --- COMPONENTES ARQUITECTÓNICOS ---
 from src.logic.pose_detector import PoseDetector
 from src.logic.squat_counter import SquatCounter
+from src.logic.valgus_detector import KneeValgusDetector
 from src.ui.components import (
     detect_runtime_env,
     handle_video_cleanup,
@@ -34,10 +35,20 @@ if "detector" not in st.session_state:
     st.session_state.detector = PoseDetector()
 if "counter" not in st.session_state:
     st.session_state.counter = SquatCounter()
+if "valgus_detector" not in st.session_state:
+    st.session_state.valgus_detector = KneeValgusDetector(threshold=0.90)
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())[:8]
 if "last_valid_results" not in st.session_state:
     st.session_state.last_valid_results = None
+
+# Variables de estado para el ciclo de vida de la repetición actual
+if "prev_count" not in st.session_state:
+    st.session_state.prev_count = 0
+if "current_rep_had_valgus" not in st.session_state:
+    st.session_state.current_rep_had_valgus = False
+if "feedback_message" not in st.session_state:
+    st.session_state.feedback_message = "Sistema listo. Esperando inicio..."
 
 is_local = detect_runtime_env()
 
@@ -87,6 +98,9 @@ if (
         st.session_state.cap.release()
         del st.session_state.cap
     st.session_state.last_valid_results = None
+    st.session_state.prev_count = 0
+    st.session_state.current_rep_had_valgus = False
+    st.session_state.feedback_message = "Sistema listo. Esperando inicio..."
 
     # Destrucción física inmediata del archivo binario saliente
     if st.session_state.prev_path and isinstance(st.session_state.prev_path, str):
@@ -103,6 +117,11 @@ if source_mode == "Archivo de vídeo (Debug)" and not video_file:
 else:
     # Vinculamos el checkbox a la clave controlada por nuestro sensor de mutación
     run = st.checkbox("🔥 Iniciar Seguimiento", key="run_btn")
+
+    # Cuadro de texto dinámico para feedback biomecánico en la pantalla principal
+    feedback_placeholder = st.empty()
+    feedback_placeholder.info(st.session_state.feedback_message)
+
     frame_placeholder = st.empty()
 
     # 2. CONTROLADOR DE FLUJO (ORQUESTADOR ESTABLE CON AUTO-RESET)
@@ -172,6 +191,51 @@ else:
 
             # La FSM se alimenta de la postura persistida para no perder continuidad
             count = st.session_state.counter.update(results.world)
+            current_state = st.session_state.counter.state
+
+            # --- EVALUACIÓN DE VALGO EN PARALELO ---
+            if results.world:
+                is_valgus, ratio = st.session_state.valgus_detector.analyze(
+                    results.world
+                )
+
+                # Monitoreamos el colapso solo en las fases críticas: DEEP o ASCENDING
+                if is_valgus and current_state in [2, 3]:
+                    st.session_state.current_rep_had_valgus = True
+
+            # Lógica de cierre de la repetición: detección del incremento del contador
+            if count > st.session_state.prev_count:
+                m = f"Repetición {count}"
+                if st.session_state.current_rep_had_valgus:
+                    m = f"⚠️ {m} completada con ¡FALLO DE VALGO! Corrige las rodillas."
+                    st.session_state.feedback_message = m
+                else:
+                    m = f"✅ {m} excelente. Buen control y alineación."
+                    st.session_state.feedback_message = m
+
+                # Actualizamos interfaz y reseteamos variables para siguiente repetición
+                if st.session_state.current_rep_had_valgus:
+                    feedback_placeholder.error(st.session_state.feedback_message)
+                else:
+                    feedback_placeholder.success(st.session_state.feedback_message)
+                st.session_state.prev_count = count
+                st.session_state.current_rep_had_valgus = False
+            else:
+                # Actualización de feedback continuo en tiempo de ejecución
+                if current_state == 0:
+                    feedback_placeholder.info(st.session_state.feedback_message)
+                elif current_state == 1:
+                    feedback_placeholder.warning(
+                        "⬇️ Descendiendo... Mantén las rodillas hacia fuera."
+                    )
+                elif current_state == 2:
+                    feedback_placeholder.warning(
+                        "🏋️‍♂️ Zona Profunda alcanzada. ¡Fuerza hacia arriba!"
+                    )
+                elif current_state == 3:
+                    feedback_placeholder.warning(
+                        "⬆️ Ascendiendo... Controla el plano frontal."
+                    )
 
             # 2.3 Preparación del frame de visualización
             h_orig, w_orig = frame.shape[:2]
@@ -292,4 +356,3 @@ else:
             st.session_state.cap.release()
             del st.session_state.cap
         handle_video_cleanup(input_path)
-        st.info("Activa el checkbox superior para poner en marcha el detector de pose.")
