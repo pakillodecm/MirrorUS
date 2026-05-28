@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 from src.logic.valgus_detector import KneeValgusDetector
 
 

@@ -9,8 +9,9 @@ import numpy as np
 import streamlit as st
 
 # --- COMPONENTES ARQUITECTÓNICOS ---
+from src.logic.depth_detector import DepthDetector
 from src.logic.pose_detector import PoseDetector
-from src.logic.squat_counter import SquatCounter
+from src.logic.squat_analyzer import SquatAnalyzer
 from src.logic.valgus_detector import KneeValgusDetector
 from src.ui.components import (
     detect_runtime_env,
@@ -33,29 +34,37 @@ if "startup_purged" not in st.session_state:
 
 if "detector" not in st.session_state:
     st.session_state.detector = PoseDetector()
-if "counter" not in st.session_state:
-    st.session_state.counter = SquatCounter()
+if "depth_detector" not in st.session_state:
+    st.session_state.depth_detector = DepthDetector()
 if "valgus_detector" not in st.session_state:
     st.session_state.valgus_detector = KneeValgusDetector(threshold=0.90)
+if "analyzer" not in st.session_state:
+    st.session_state.analyzer = SquatAnalyzer(
+        depth_detector=st.session_state.depth_detector,
+        detectors={"KNEE_VALGUS": st.session_state.valgus_detector},
+    )
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())[:8]
 if "last_valid_results" not in st.session_state:
     st.session_state.last_valid_results = None
 
-# Variables de estado para el ciclo de vida de la repetición actual
-if "prev_count" not in st.session_state:
-    st.session_state.prev_count = 0
-if "current_rep_had_valgus" not in st.session_state:
-    st.session_state.current_rep_had_valgus = False
-if "feedback_message" not in st.session_state:
-    st.session_state.feedback_message = "Sistema listo. Esperando inicio..."
+# Sincronización del estado visual y feedback
+if "last_rep_feedback" not in st.session_state:
+    st.session_state.last_rep_feedback = {
+        "text": "Esperando repeticiones...",
+        "type": "info",
+    }
 
 is_local = detect_runtime_env()
 
 with st.sidebar:
-    source_mode, skip_mode = render_sidebar_config(
+    source_mode, skip_mode, d_thr, u_thr = render_sidebar_config(
         is_local, st.session_state.session_id
     )
+
+# Sincronización dinámica de los sliders del panel lateral con el detector geométrico
+st.session_state.depth_detector.down_threshold = d_thr
+st.session_state.depth_detector.up_threshold = u_thr
 
 render_header_and_instructions(is_local, source_mode)
 
@@ -87,44 +96,59 @@ if "prev_source" not in st.session_state:
 if "prev_path" not in st.session_state:
     st.session_state.prev_path = input_path
 
-# Si el usuario cambia la radio o sube otro vídeo, se activa el protocolo de apagado
 if (
     source_mode != st.session_state.prev_source
     or input_path != st.session_state.prev_path
 ):
-    st.session_state.run_btn = False  # Forzamos el apagado del checkbox en la memoria
+    st.session_state.run_btn = False
 
     if "cap" in st.session_state:
         st.session_state.cap.release()
         del st.session_state.cap
     st.session_state.last_valid_results = None
-    st.session_state.prev_count = 0
-    st.session_state.current_rep_had_valgus = False
-    st.session_state.feedback_message = "Sistema listo. Esperando inicio..."
+    st.session_state.analyzer.reset_counters()
+    st.session_state.last_rep_feedback = {
+        "text": "Sistema listo. Esperando inicio...",
+        "type": "info",
+    }
 
-    # Destrucción física inmediata del archivo binario saliente
     if st.session_state.prev_path and isinstance(st.session_state.prev_path, str):
         handle_video_cleanup(st.session_state.prev_path)
 
-    # Sincronizamos el histórico para el próximo ciclo
     st.session_state.prev_source = source_mode
     st.session_state.prev_path = input_path
-    st.rerun()  # Reinicio inmediato para reflejar el apagado visual
+    st.rerun()
 
 # --- CONTROLADOR DE VISIBILIDAD REACTIVO POR UX ---
 if source_mode == "Archivo de vídeo (Debug)" and not video_file:
     st.warning("Por favor, sube un archivo de vídeo para continuar.")
 else:
-    # Vinculamos el checkbox a la clave controlada por nuestro sensor de mutación
     run = st.checkbox("🔥 Iniciar Seguimiento", key="run_btn")
 
-    # Cuadro de texto dinámico para feedback biomecánico en la pantalla principal
+    # Contenedores dinámicos del Front
     feedback_placeholder = st.empty()
-    feedback_placeholder.info(st.session_state.feedback_message)
+    metrics_cols = st.columns(2)
+    rep_valid_metric = metrics_cols[0].empty()
+    rep_invalid_metric = metrics_cols[1].empty()
 
     frame_placeholder = st.empty()
 
-    # 2. CONTROLADOR DE FLUJO (ORQUESTADOR ESTABLE CON AUTO-RESET)
+    # Marcadores estáticos iniciales para evitar parpadeos
+    rep_valid_metric.metric(
+        "👍 REPETICIONES VÁLIDAS", st.session_state.analyzer.count_valid
+    )
+    rep_invalid_metric.metric(
+        "❌ REPETICIONES CON FALLO", st.session_state.analyzer.count_invalid
+    )
+
+    if st.session_state.last_rep_feedback["type"] == "error":
+        feedback_placeholder.error(st.session_state.last_rep_feedback["text"])
+    elif st.session_state.last_rep_feedback["type"] == "success":
+        feedback_placeholder.success(st.session_state.last_rep_feedback["text"])
+    else:
+        feedback_placeholder.info(st.session_state.last_rep_feedback["text"])
+
+    # 2. CONTROLADOR DE FLUJO (ORQUESTADOR ESTABLE)
     if run:
         backend = cv2.CAP_DSHOW if source_mode == "Cámara en vivo" else cv2.CAP_ANY
 
@@ -145,13 +169,13 @@ else:
                 video_fps = 30.0
             loop_delay = 1.0 / video_fps
 
-        frame_idx = 0  # Inicializador de fotogramas secuenciales
-        video_start_time = None  # Ancla de tiempo absoluto de reproducción
+        frame_idx = 0
+        video_start_time = None
+        last_history_len = len(st.session_state.analyzer.history)
 
         while run:
-            start_time = time.time()  # Ancla de tiempo para compensación dinámica
+            start_time = time.time()
 
-            # Inicialización del reloj absoluto en el primer fotograma real
             if frame_idx == 0 and source_mode != "Cámara en vivo":
                 video_start_time = time.time()
 
@@ -166,10 +190,8 @@ else:
                     break
 
             if do_flip:
-                # 1 -> flip horizontal (efecto espejo), 0 -> flip vertical, -1 -> ambos
                 frame = cv2.flip(frame, 1)
 
-            # 2.1 Algoritmo Adaptativo de Salto de Frames
             should_skip = False
             if skip_mode == "Equilibrado (66% IA)":
                 if frame_idx % 3 == 2:  # Patrón 1 1 0 1 1 0
@@ -178,53 +200,51 @@ else:
                 if frame_idx % 2 == 1:  # Patrón 1 0 1 0 1 0
                     should_skip = True
 
-            # 2.2 Gestión de Inferencia vs Retención de Orden Cero (Zero-Order Hold)
             if not should_skip:
                 results = st.session_state.detector.extract_landmarks(frame)
                 st.session_state.last_valid_results = results
             else:
                 results = st.session_state.last_valid_results
                 if results is None:
-                    # Inferencia de rescate obligatoria si el primer frame requiere skip
                     results = st.session_state.detector.extract_landmarks(frame)
                     st.session_state.last_valid_results = results
 
-            # La FSM se alimenta de la postura persistida para no perder continuidad
-            count = st.session_state.counter.update(results.world)
-            current_state = st.session_state.counter.state
+            # CONSUMO DEL BACKEND A TRAVÉS DE UN ÚNICO PAYLOAD GENÉRICO
+            payload = st.session_state.analyzer.process_frame(results.world)
+            current_state = payload["fsm_state"]
+            current_history = payload["session_history"]
 
-            # --- EVALUACIÓN DE VALGO EN PARALELO ---
-            if results.world:
-                is_valgus, ratio = st.session_state.valgus_detector.analyze(
-                    results.world
-                )
+            # Actualización en tiempo real de marcadores de rendimiento en el Front
+            rep_valid_metric.metric(
+                "👍 REPETICIONES VÁLIDAS", payload["rep_valid_count"]
+            )
+            rep_invalid_metric.metric(
+                "❌ REPETICIONES CON FALLO", payload["rep_invalid_count"]
+            )
 
-                # Monitoreamos el colapso solo en las fases críticas: DEEP o ASCENDING
-                if is_valgus and current_state in [2, 3]:
-                    st.session_state.current_rep_had_valgus = True
-
-            # Lógica de cierre de la repetición: detección del incremento del contador
-            if count > st.session_state.prev_count:
-                m = f"Repetición {count}"
-                if st.session_state.current_rep_had_valgus:
-                    m = f"⚠️ {m} completada con ¡FALLO DE VALGO! Corrige las rodillas."
-                    st.session_state.feedback_message = m
+            if len(current_history) > last_history_len:
+                last_rep = current_history[-1]
+                if last_rep["valid"]:
+                    st.session_state.last_rep_feedback = {
+                        "text": f"✅ Repetición {last_rep['rep']} excelente.",
+                        "type": "success",
+                    }
+                    feedback_placeholder.success(
+                        st.session_state.last_rep_feedback["text"]
+                    )
                 else:
-                    m = f"✅ {m} excelente. Buen control y alineación."
-                    st.session_state.feedback_message = m
-
-                # Actualizamos interfaz y reseteamos variables para siguiente repetición
-                if st.session_state.current_rep_had_valgus:
-                    feedback_placeholder.error(st.session_state.feedback_message)
-                else:
-                    feedback_placeholder.success(st.session_state.feedback_message)
-                st.session_state.prev_count = count
-                st.session_state.current_rep_had_valgus = False
+                    errors = ", ".join(last_rep["errors"])
+                    st.session_state.last_rep_feedback = {
+                        "text": f"⚠️ Repetición {last_rep['rep']} fallida: {errors}.",
+                        "type": "error",
+                    }
+                    feedback_placeholder.error(
+                        st.session_state.last_rep_feedback["text"]
+                    )
+                last_history_len = len(current_history)
             else:
-                # Actualización de feedback continuo en tiempo de ejecución
-                if current_state == 0:
-                    feedback_placeholder.info(st.session_state.feedback_message)
-                elif current_state == 1:
+                # Guías dinámicas de ejecución continua
+                if current_state == 1:
                     feedback_placeholder.warning(
                         "⬇️ Descendiendo... Mantén las rodillas hacia fuera."
                     )
@@ -237,7 +257,7 @@ else:
                         "⬆️ Ascendiendo... Controla el plano frontal."
                     )
 
-            # 2.3 Preparación del frame de visualización
+            # Preparación y pintado de la capa gráfica
             h_orig, w_orig = frame.shape[:2]
             display_h = 480
             display_w = int(display_h * (w_orig / h_orig))
@@ -245,35 +265,31 @@ else:
                 frame, (display_w, display_h), interpolation=cv2.INTER_AREA
             )
 
-            h, w = display_h, display_w
-            rect_w, rect_h = int(w * 0.4), 60
-            rect_x = (w // 2) - (rect_w // 2)
-
-            d_thr = st.session_state.counter.thr_down
-            u_thr = st.session_state.counter.thr_up
-
-            # 2.4 Pintar Capas Gráficas
             if results.world:
-                angle = st.session_state.counter.last_angle
-                st.session_state.detector.draw_landmarks(frame_display, results.raw)
+                # El esqueleto cambia a ROJO si hay un fallo de valgo en el frame exacto
+                if payload["current_frame_errors"].get("KNEE_VALGUS", False):
+                    # dibujo alternativo/manipulación visual en esqueleto -> TODO
+                    # De momento pintamos landmarks estándar.
+                    st.session_state.detector.draw_landmarks(frame_display, results.raw)
+                else:
+                    st.session_state.detector.draw_landmarks(frame_display, results.raw)
 
-                # --- UI: BARRA DE PROFUNDIDAD ---
+                # Capa de la barra lateral sagital
+                angle = payload["metrics"]["knee_angle"]
                 range_angle = u_thr - d_thr
                 progress = np.clip((u_thr - angle) / range_angle, 0.0, 1.0)
 
-                bar_w, bar_x = int(w * 0.08), int(w * 0.05)
-                bar_y_top, bar_y_bottom = int(h * 0.25), int(h * 0.85)
+                bar_w, bar_x = int(display_w * 0.08), int(display_w * 0.05)
+                bar_y_top, bar_y_bottom = int(display_h * 0.25), int(display_h * 0.85)
                 bar_height = bar_y_bottom - bar_y_top
 
-                actual_state = st.session_state.counter.state
-                if actual_state == 2:
+                if current_state == 2:
                     color = (0, 255, 0)  # Verde: Profundidad conseguida
-                elif actual_state in [1, 3]:
+                elif current_state in [1, 3]:
                     color = (0, 255, 255)  # Amarillo: En transición
                 else:
                     color = (0, 0, 255)  # Rojo: Bloqueo/Reposo
 
-                # Fondo gris de la barra
                 cv2.rectangle(
                     frame_display,
                     (bar_x, bar_y_top),
@@ -281,7 +297,6 @@ else:
                     (40, 40, 40),
                     -1,
                 )
-                # Relleno dinámico proporcional
                 fill_level = int(bar_y_bottom - (progress * bar_height))
                 cv2.rectangle(
                     frame_display,
@@ -290,7 +305,6 @@ else:
                     color,
                     -1,
                 )
-                # Texto porcentual
                 cv2.putText(
                     frame_display,
                     f"{int(progress * 100)}%",
@@ -302,33 +316,10 @@ else:
                     cv2.LINE_AA,
                 )
 
-            # --- UI: CONTADOR DE REPETICIONES PERSISTENTE ---
-            cv2.rectangle(
-                frame_display,
-                (rect_x, 10),
-                (rect_x + rect_w, 10 + rect_h),
-                (0, 0, 0),
-                -1,
-            )
-            rep_color = (
-                (0, 255, 0) if st.session_state.counter.state == 2 else (0, 255, 255)
-            )
-            cv2.putText(
-                frame_display,
-                f"REPS: {count}",
-                (rect_x + 20, 10 + 45),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.1,
-                rep_color,
-                3,
-                cv2.LINE_AA,
-            )
-
             frame_placeholder.image(frame_display, channels="BGR", width="stretch")
+            frame_idx += 1
 
-            frame_idx += 1  # Incremento de control indexado
-
-            # 2.5 Reloj de Compensación Dinámica (Evita la cámara lenta)
+            # Reloj de Compensación Dinámica
             if source_mode == "Cámara en vivo":
                 elapsed = time.time() - start_time
                 time.sleep(max(0.001, loop_delay - elapsed))
@@ -356,3 +347,9 @@ else:
             st.session_state.cap.release()
             del st.session_state.cap
         handle_video_cleanup(input_path)
+
+    # --- HISTORIAL DESPLEGABLE DE RENDIMIENTO DE SESIÓN ---
+    if st.session_state.analyzer.history:
+        st.divider()
+        st.subheader("📊 Historial Analítico de la Serie")
+        st.table(st.session_state.analyzer.history)

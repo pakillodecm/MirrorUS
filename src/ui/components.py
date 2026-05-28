@@ -15,15 +15,16 @@ def detect_runtime_env() -> bool:
 
 
 def render_sidebar_config(is_local: bool, session_id: str):
-    """Renderiza el panel lateral de configuración y gestiona el archivo de vídeo.
-    Maneja el aislamiento de archivos por sesión para evitar colisiones.
+    """Renderiza el panel lateral de configuración sin acoplamiento de estado interno.
+
+    Maneja los sliders biomecánicos retornando valores primitivos de configuración.
 
     Args:
         is_local (bool): Indicador de entorno de ejecución.
         session_id (str): Identificador único de la sesión actual.
 
     Returns:
-        tuple: (source_mode, skip_mode)
+        tuple: (source_mode, skip_mode, d_thr, u_thr)
     """
     st.header("⚙️ Configuración")
 
@@ -57,10 +58,7 @@ def render_sidebar_config(is_local: bool, session_id: str):
     d_thr = st.slider("Umbral Profundidad (Ángulo bajo)", 60, 110, 90)
     u_thr = st.slider("Umbral Erguido (Ángulo alto)", 130, 180, 150)
 
-    st.session_state.counter.thr_down = d_thr
-    st.session_state.counter.thr_up = u_thr
-
-    return source_mode, skip_mode
+    return source_mode, skip_mode, d_thr, u_thr
 
 
 def render_header_and_instructions(is_local: bool, source_mode: str):

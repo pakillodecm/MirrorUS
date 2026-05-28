@@ -1,4 +1,5 @@
 import numpy as np
+
 from src.logic.filters import OneEuroFilter
 
 
