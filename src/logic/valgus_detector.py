@@ -40,9 +40,13 @@ class KneeValgusDetector:
             if l_hip[3] < 0.5 or r_hip[3] < 0.5 or l_knee[3] < 0.5 or r_knee[3] < 0.5:
                 return False, 1.0
 
-            # Distancia horizontal absoluta en el eje X (metros reales)
-            hip_distance = abs(l_hip[0] - r_hip[0])
-            knee_distance = abs(l_knee[0] - r_knee[0])
+            # Distancia horizontal real en el plano XZ (metros reales)
+            hip_distance = np.sqrt(
+                (l_hip[0] - r_hip[0]) ** 2 + (l_hip[2] - r_hip[2]) ** 2
+            )
+            knee_distance = np.sqrt(
+                (l_knee[0] - r_knee[0]) ** 2 + (l_knee[2] - r_knee[2]) ** 2
+            )
 
             if hip_distance == 0:
                 return False, 1.0

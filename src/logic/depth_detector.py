@@ -6,15 +6,22 @@ from src.logic.angles import calculate_angle
 
 
 class DepthDetector:
-    def __init__(self, down_threshold: float = 90.0, up_threshold: float = 160.0):
+    def __init__(
+        self,
+        down_threshold: float = 90.0,
+        up_threshold: float = 160.0,
+        min_combined_visibility: float = 1.2,
+    ):
         """Inicializa el detector puramente geométrico de profundidad.
 
         Args:
             down_threshold (float): Ángulo por debajo del cual se rompe el paralelo.
             up_threshold (float): Ángulo por encima del cual se considera erguido.
+            min_combined_visibility (float): Visibilidad mínima para tener validez.
         """
         self.down_threshold = float(down_threshold)
         self.up_threshold = float(up_threshold)
+        self.min_combined_visibility = float(min_combined_visibility)
 
     def _calculate_weighted_angle(
         self, landmarks: Dict[str, np.ndarray]
@@ -38,7 +45,7 @@ class DepthDetector:
             r_vis = r_knee[3]
 
             total_vis = l_vis + r_vis
-            if total_vis < 1.2:
+            if total_vis < self.min_combined_visibility:
                 return None
 
             return (l_angle * l_vis + r_angle * r_vis) / total_vis
