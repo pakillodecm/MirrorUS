@@ -165,3 +165,33 @@ def test_analyzer_ascent_collapse():
     assert payload["rep_invalid_count"] == 1
     assert payload["session_history"][-1]["valid"] is False
     assert "MID_ASCENT_COLLAPSE" in payload["session_history"][-1]["errors"]
+
+
+def test_analyzer_reset_counters():
+    """Verifica que reset_counters deja el estado interno completamente limpio
+    tras haber completado una repetición válida.
+    """
+    depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
+    valgus = KneeValgusDetector(threshold=0.90)
+    analyzer = SquatAnalyzer(
+        depth_detector=depth, detectors={"KNEE_VALGUS": valgus}, hysteresis=5.0
+    )
+
+    analyzer.process_frame(create_frame_data(170.0, 0.40, 0.40), timestamp=0.0)
+    analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40), timestamp=1.0)
+    analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40), timestamp=2.0)
+    analyzer.process_frame(create_frame_data(120.0, 0.40, 0.40), timestamp=3.0)
+    analyzer.process_frame(create_frame_data(160.0, 0.40, 0.40), timestamp=4.0)
+    assert analyzer.count_valid == 1
+
+    analyzer.reset_counters()
+
+    assert analyzer.state == 0
+    assert analyzer.count_valid == 0
+    assert analyzer.count_invalid == 0
+    assert analyzer.history == []
+    assert analyzer.current_rep_errors == set()
+    assert analyzer.time_start_descent is None
+    assert analyzer.time_reached_deep is None
+    assert analyzer.last_descent_duration == 0.0
+    assert analyzer.last_ascent_duration == 0.0
