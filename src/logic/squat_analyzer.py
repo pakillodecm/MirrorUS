@@ -1,9 +1,27 @@
 import time
-from typing import Any, Dict, Optional
+from typing import Dict, List, Optional, TypedDict
 
 import numpy as np
 
 from src.logic.depth_detector import DepthDetector
+
+
+class RepRecord(TypedDict):
+    rep: int
+    valid: bool
+    errors: List[str]
+    descent_duration_sec: float
+    ascent_duration_sec: float
+
+
+class FramePayload(TypedDict):
+    rep_valid_count: int
+    rep_invalid_count: int
+    fsm_state: int
+    feedback_message: str
+    current_frame_errors: Dict[str, bool]
+    metrics: Dict[str, float]
+    session_history: List[RepRecord]
 
 
 class SquatAnalyzer:
@@ -64,7 +82,7 @@ class SquatAnalyzer:
         self,
         world_landmarks: Optional[Dict[str, np.ndarray]],
         timestamp: Optional[float] = None,
-    ) -> Dict[str, Any]:
+    ) -> FramePayload:
         """Procesa el fotograma actual ejecutando la lógica analítica y temporal.
 
         Args:
