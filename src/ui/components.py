@@ -24,7 +24,7 @@ def render_sidebar_config(is_local: bool, session_id: str):
         session_id (str): Identificador único de la sesión actual.
 
     Returns:
-        tuple: (source_mode, skip_mode, d_thr, u_thr)
+        tuple: (source_mode, skip_mode, d_thr, u_thr, t_thr)
     """
     st.header("⚙️ Configuración")
 
@@ -57,8 +57,9 @@ def render_sidebar_config(is_local: bool, session_id: str):
     st.subheader("🎯 Umbrales Biomecánicos")
     d_thr = st.slider("Umbral Profundidad (Ángulo bajo)", 60, 110, 90)
     u_thr = st.slider("Umbral Erguido (Ángulo alto)", 130, 180, 150)
+    t_thr = st.slider("Tolerancia Inclinación Torso (Grados)", 20, 60, 40)
 
-    return source_mode, skip_mode, d_thr, u_thr
+    return source_mode, skip_mode, d_thr, u_thr, t_thr
 
 
 def render_header_and_instructions(is_local: bool, source_mode: str):
@@ -66,7 +67,8 @@ def render_header_and_instructions(is_local: bool, source_mode: str):
 
     Args:
         is_local (bool): Indicador de entorno de ejecución.
-        source_mode (str): Modo de fuente de entrada."""
+        source_mode (str): Modo de fuente de entrada.
+    """
     st.title("🏋️‍♂️ MirrorUS")
     st.caption("Trabajo Fin de Grado - Sistema Inteligente de Análisis Biomecánico")
 

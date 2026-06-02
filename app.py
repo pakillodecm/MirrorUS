@@ -12,6 +12,7 @@ import streamlit as st
 from src.logic.depth_detector import DepthDetector
 from src.logic.pose_detector import PoseDetector
 from src.logic.squat_analyzer import SquatAnalyzer
+from src.logic.torso_detector import TorsoTiltDetector
 from src.logic.valgus_detector import KneeValgusDetector
 from src.ui.components import (
     detect_runtime_env,
@@ -38,10 +39,16 @@ if "depth_detector" not in st.session_state:
     st.session_state.depth_detector = DepthDetector()
 if "valgus_detector" not in st.session_state:
     st.session_state.valgus_detector = KneeValgusDetector(threshold=0.90)
+if "torso_detector" not in st.session_state:
+    st.session_state.torso_detector = TorsoTiltDetector(max_tilt_deg=40.0)
+
 if "analyzer" not in st.session_state:
     st.session_state.analyzer = SquatAnalyzer(
         depth_detector=st.session_state.depth_detector,
-        detectors={"KNEE_VALGUS": st.session_state.valgus_detector},
+        detectors={
+            "KNEE_VALGUS": st.session_state.valgus_detector,
+            "TORSO_TILT": st.session_state.torso_detector,
+        },
     )
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())[:8]
@@ -58,13 +65,14 @@ if "last_rep_feedback" not in st.session_state:
 is_local = detect_runtime_env()
 
 with st.sidebar:
-    source_mode, skip_mode, d_thr, u_thr = render_sidebar_config(
+    source_mode, skip_mode, d_thr, u_thr, t_thr = render_sidebar_config(
         is_local, st.session_state.session_id
     )
 
-# Sincronización dinámica de los sliders del panel lateral con el detector geométrico
+# Sincronización dinámica de los sliders del panel lateral con los detectores lógicos
 st.session_state.depth_detector.down_threshold = d_thr
 st.session_state.depth_detector.up_threshold = u_thr
+st.session_state.torso_detector.max_tilt_deg = t_thr
 
 render_header_and_instructions(is_local, source_mode)
 
@@ -224,6 +232,9 @@ else:
 
             if len(current_history) > last_history_len:
                 last_rep = current_history[-1]
+                t_bajada = last_rep["descent_duration_sec"]
+                t_subida = last_rep["ascent_duration_sec"]
+
                 if last_rep["valid"]:
                     st.session_state.last_rep_feedback = {
                         "text": f"✅ Repetición {last_rep['rep']} excelente.",
@@ -246,7 +257,7 @@ else:
                 # Guías dinámicas de ejecución continua
                 if current_state == 1:
                     feedback_placeholder.warning(
-                        "⬇️ Descendiendo... Mantén las rodillas hacia fuera."
+                        "⬇️ Descendiendo... Mantén estabilidad y control."
                     )
                 elif current_state == 2:
                     feedback_placeholder.warning(
@@ -254,7 +265,7 @@ else:
                     )
                 elif current_state == 3:
                     feedback_placeholder.warning(
-                        "⬆️ Ascendiendo... Controla el plano frontal."
+                        "⬆️ Ascendiendo... Controla la forma corporal."
                     )
 
             # Preparación y pintado de la capa gráfica
@@ -266,15 +277,9 @@ else:
             )
 
             if results.world:
-                # El esqueleto cambia a ROJO si hay un fallo de valgo en el frame exacto
-                if payload["current_frame_errors"].get("KNEE_VALGUS", False):
-                    # dibujo alternativo/manipulación visual en esqueleto -> TODO
-                    # De momento pintamos landmarks estándar.
-                    st.session_state.detector.draw_landmarks(frame_display, results.raw)
-                else:
-                    st.session_state.detector.draw_landmarks(frame_display, results.raw)
+                st.session_state.detector.draw_landmarks(frame_display, results.raw)
 
-                # Capa de la barra lateral sagital
+                # Capa de la barra lateral sagital de progreso de profundidad
                 angle = payload["metrics"]["knee_angle"]
                 range_angle = u_thr - d_thr
                 progress = np.clip((u_thr - angle) / range_angle, 0.0, 1.0)
@@ -316,6 +321,19 @@ else:
                     cv2.LINE_AA,
                 )
 
+                # Capa de telemetría secundaria: Inclinación instantánea del Torso
+                t_tilt = payload["metrics"].get("torso_tilt_deg", 0.0)
+                cv2.putText(
+                    frame_display,
+                    f"Torso: {t_tilt:.1f} Grad",
+                    (display_w - 180, display_h - 20),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 255, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
+
             frame_placeholder.image(frame_display, channels="BGR", width="stretch")
             frame_idx += 1
 
@@ -351,5 +369,5 @@ else:
     # --- HISTORIAL DESPLEGABLE DE RENDIMIENTO DE SESIÓN ---
     if st.session_state.analyzer.history:
         st.divider()
-        st.subheader("📊 Historial Analítico de la Serie")
-        st.table(st.session_state.analyzer.history)
+        st.subheader("📊 Historial Analítico de la Serie (VBT & Postura)")
+        st.dataframe(st.session_state.analyzer.history, use_container_width=True)
