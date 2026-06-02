@@ -133,7 +133,7 @@ class SquatAnalyzer:
                 state_changed = True
 
         # 3. Gestión del ciclo de vida de los errores de la repetición
-        if old_state == 0 and self.state == 1:
+        if old_state == 0 and self.state != 0:
             self.current_rep_errors = set()
 
         if self.state in [1, 2, 3]:

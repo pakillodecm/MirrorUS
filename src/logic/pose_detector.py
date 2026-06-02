@@ -1,4 +1,4 @@
-from typing import Dict, NamedTuple, Optional
+from typing import Any, Dict, NamedTuple, Optional
 
 import cv2
 import mediapipe as mp
@@ -12,7 +12,7 @@ class PoseResult(NamedTuple):
 
     normalized: Optional[Dict[str, np.ndarray]]
     world: Optional[Dict[str, np.ndarray]]
-    raw: Optional[any]
+    raw: Optional[Any]
 
 
 class PoseDetector:
