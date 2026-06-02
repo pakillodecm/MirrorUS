@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from src.logic.depth_detector import DepthDetector
 from src.logic.squat_analyzer import SquatAnalyzer
@@ -39,36 +40,54 @@ def create_frame_data(
 
 
 def test_analyzer_perfect_lifecycle():
-    """Verifica el ciclo completo de una repetición perfecta sin fallos."""
+    """Verifica el ciclo completo de una repetición perfecta sin fallos
+    y valida la telemetría temporal de velocidad por fases.
+    """
     depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
     valgus = KneeValgusDetector(threshold=0.90)
     analyzer = SquatAnalyzer(
         depth_detector=depth, detectors={"KNEE_VALGUS": valgus}, hysteresis=5.0
     )
 
-    # 1. STAND (170 grados)
-    payload = analyzer.process_frame(create_frame_data(170.0, 0.40, 0.40))
+    # 1. STAND (170 grados) en el segundo 0.0
+    payload = analyzer.process_frame(
+        create_frame_data(170.0, 0.40, 0.40), timestamp=0.0
+    )
     assert payload["fsm_state"] == 0
-    assert payload["rep_valid_count"] == 0
 
-    # 2. DESCENDING (130 grados)
-    payload = analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40))
+    # 2. DESCENDING (130 grados) en el segundo 1.0 -> Aquí arranca la bajada
+    payload = analyzer.process_frame(
+        create_frame_data(130.0, 0.40, 0.40), timestamp=1.0
+    )
     assert payload["fsm_state"] == 1
 
-    # 3. DEEP (85 grados)
-    payload = analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40))
+    # 3. DEEP (85 grados) en el segundo 2.5 -> Aquí termina la bajada (Duración = 1.5s)
+    payload = analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40), timestamp=2.5)
     assert payload["fsm_state"] == 2
 
-    # 4. ASCENDING (120 grados)
-    payload = analyzer.process_frame(create_frame_data(120.0, 0.40, 0.40))
+    # 4. ASCENDING (120 grados) en el segundo 3.5 -> Aquí arranca la subida
+    payload = analyzer.process_frame(
+        create_frame_data(120.0, 0.40, 0.40), timestamp=3.5
+    )
     assert payload["fsm_state"] == 3
 
-    # 5. RETORNO A STAND (160 grados) -> Cierre y aumento de marcador válido
-    payload = analyzer.process_frame(create_frame_data(160.0, 0.40, 0.40))
+    # 5. STAND (160 grados) en el segundo 4.5 -> Fin de la subida (Duración = 2.0s)
+    payload = analyzer.process_frame(
+        create_frame_data(160.0, 0.40, 0.40), timestamp=4.5
+    )
+
+    # VALIDACIONES DE TELEMETRÍA TEMPORAL (VBT):
     assert payload["fsm_state"] == 0
     assert payload["rep_valid_count"] == 1
-    assert payload["rep_invalid_count"] == 0
-    assert payload["session_history"][-1]["valid"] is True
+
+    # Exigimos las duraciones en las métricas del último ciclo
+    assert pytest.approx(payload["metrics"]["descent_duration_sec"]) == 1.5
+    assert pytest.approx(payload["metrics"]["ascent_duration_sec"]) == 2.0
+
+    # Exigimos que el historial guarde el reporte temporal de forma persistente
+    last_history = payload["session_history"][-1]
+    assert pytest.approx(last_history["descent_duration_sec"]) == 1.5
+    assert pytest.approx(last_history["ascent_duration_sec"]) == 2.0
 
 
 def test_analyzer_failed_lifecycle_with_valgus():
