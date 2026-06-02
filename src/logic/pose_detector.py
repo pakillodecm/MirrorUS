@@ -102,3 +102,9 @@ class PoseDetector:
                 self.mp_pose.POSE_CONNECTIONS,
                 landmark_drawing_spec=df_pose_lm,
             )
+
+    def reset_filters(self) -> None:
+        """Reinicia todos los filtros de suavizado."""
+        for f in self.filters_world.values():
+            f.reset()
+        self.filters_world.clear()
