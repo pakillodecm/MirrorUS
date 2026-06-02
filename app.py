@@ -115,6 +115,7 @@ if (
         del st.session_state.cap
     st.session_state.last_valid_results = None
     st.session_state.analyzer.reset_counters()
+    st.session_state.detector.reset_filters()
     st.session_state.last_rep_feedback = {
         "text": "Sistema listo. Esperando inicio...",
         "type": "info",
@@ -181,185 +182,190 @@ else:
         video_start_time = None
         last_history_len = len(st.session_state.analyzer.history)
 
-        while run:
-            start_time = time.time()
+        try:
+            while run:
+                start_time = time.time()
 
-            if frame_idx == 0 and source_mode != "Cámara en vivo":
-                video_start_time = time.time()
-
-            ret, frame = cap.read()
-            if not ret:
-                if source_mode == "Archivo de vídeo (Debug)":
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    frame_idx = 0
+                if frame_idx == 0 and source_mode != "Cámara en vivo":
                     video_start_time = time.time()
-                    continue
-                else:
-                    break
 
-            if do_flip:
-                frame = cv2.flip(frame, 1)
+                ret, frame = cap.read()
+                if not ret:
+                    if source_mode == "Archivo de vídeo (Debug)":
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        frame_idx = 0
+                        video_start_time = time.time()
+                        continue
+                    else:
+                        break
 
-            should_skip = False
-            if skip_mode == "Equilibrado (66% IA)":
-                if frame_idx % 3 == 2:  # Patrón 1 1 0 1 1 0
-                    should_skip = True
-            elif skip_mode == "Máximo Rendimiento (50% IA)":
-                if frame_idx % 2 == 1:  # Patrón 1 0 1 0 1 0
-                    should_skip = True
+                if do_flip:
+                    frame = cv2.flip(frame, 1)
 
-            if not should_skip:
-                results = st.session_state.detector.extract_landmarks(frame)
-                st.session_state.last_valid_results = results
-            else:
-                results = st.session_state.last_valid_results
-                if results is None:
+                should_skip = False
+                if skip_mode == "Equilibrado (66% IA)":
+                    if frame_idx % 3 == 2:  # Patrón 1 1 0 1 1 0
+                        should_skip = True
+                elif skip_mode == "Máximo Rendimiento (50% IA)":
+                    if frame_idx % 2 == 1:  # Patrón 1 0 1 0 1 0
+                        should_skip = True
+
+                if not should_skip:
                     results = st.session_state.detector.extract_landmarks(frame)
                     st.session_state.last_valid_results = results
-
-            # CONSUMO DEL BACKEND A TRAVÉS DE UN ÚNICO PAYLOAD GENÉRICO
-            payload = st.session_state.analyzer.process_frame(results.world)
-            current_state = payload["fsm_state"]
-            current_history = payload["session_history"]
-
-            # Actualización en tiempo real de marcadores de rendimiento en el Front
-            rep_valid_metric.metric(
-                "👍 REPETICIONES VÁLIDAS", payload["rep_valid_count"]
-            )
-            rep_invalid_metric.metric(
-                "❌ REPETICIONES CON FALLO", payload["rep_invalid_count"]
-            )
-
-            if len(current_history) > last_history_len:
-                last_rep = current_history[-1]
-                t_bajada = last_rep["descent_duration_sec"]
-                t_subida = last_rep["ascent_duration_sec"]
-
-                if last_rep["valid"]:
-                    st.session_state.last_rep_feedback = {
-                        "text": f"✅ Repetición {last_rep['rep']} excelente.",
-                        "type": "success",
-                    }
-                    feedback_placeholder.success(
-                        st.session_state.last_rep_feedback["text"]
-                    )
                 else:
-                    errors = ", ".join(last_rep["errors"])
-                    st.session_state.last_rep_feedback = {
-                        "text": f"⚠️ Repetición {last_rep['rep']} fallida: {errors}.",
-                        "type": "error",
-                    }
-                    feedback_placeholder.error(
-                        st.session_state.last_rep_feedback["text"]
-                    )
-                last_history_len = len(current_history)
-            else:
-                # Guías dinámicas de ejecución continua
-                if current_state == 1:
-                    feedback_placeholder.warning(
-                        "⬇️ Descendiendo... Mantén estabilidad y control."
-                    )
-                elif current_state == 2:
-                    feedback_placeholder.warning(
-                        "🏋️‍♂️ Zona Profunda alcanzada. ¡Fuerza hacia arriba!"
-                    )
-                elif current_state == 3:
-                    feedback_placeholder.warning(
-                        "⬆️ Ascendiendo... Controla la forma corporal."
-                    )
+                    results = st.session_state.last_valid_results
+                    if results is None:
+                        results = st.session_state.detector.extract_landmarks(frame)
+                        st.session_state.last_valid_results = results
 
-            # Preparación y pintado de la capa gráfica
-            h_orig, w_orig = frame.shape[:2]
-            display_h = 480
-            display_w = int(display_h * (w_orig / h_orig))
-            frame_display = cv2.resize(
-                frame, (display_w, display_h), interpolation=cv2.INTER_AREA
-            )
+                # CONSUMO DEL BACKEND A TRAVÉS DE UN ÚNICO PAYLOAD GENÉRICO
+                payload = st.session_state.analyzer.process_frame(results.world)
+                current_state = payload["fsm_state"]
+                current_history = payload["session_history"]
 
-            if results.world:
-                st.session_state.detector.draw_landmarks(frame_display, results.raw)
+                # Actualización en tiempo real de marcadores de rendimiento en el Front
+                rep_valid_metric.metric(
+                    "👍 REPETICIONES VÁLIDAS", payload["rep_valid_count"]
+                )
+                rep_invalid_metric.metric(
+                    "❌ REPETICIONES CON FALLO", payload["rep_invalid_count"]
+                )
 
-                # Capa de la barra lateral sagital de progreso de profundidad
-                angle = payload["metrics"]["knee_angle"]
-                range_angle = u_thr - d_thr
-                progress = np.clip((u_thr - angle) / range_angle, 0.0, 1.0)
+                if len(current_history) > last_history_len:
+                    last_rep = current_history[-1]
+                    t_bajada = last_rep["descent_duration_sec"]
+                    t_subida = last_rep["ascent_duration_sec"]
 
-                bar_w, bar_x = int(display_w * 0.08), int(display_w * 0.05)
-                bar_y_top, bar_y_bottom = int(display_h * 0.25), int(display_h * 0.85)
-                bar_height = bar_y_bottom - bar_y_top
-
-                if current_state == 2:
-                    color = (0, 255, 0)  # Verde: Profundidad conseguida
-                elif current_state in [1, 3]:
-                    color = (0, 255, 255)  # Amarillo: En transición
+                    if last_rep["valid"]:
+                        st.session_state.last_rep_feedback = {
+                            "text": f"✅ Repetición {last_rep['rep']} excelente.",
+                            "type": "success",
+                        }
+                        feedback_placeholder.success(
+                            st.session_state.last_rep_feedback["text"]
+                        )
+                    else:
+                        err = ", ".join(last_rep["errors"])
+                        st.session_state.last_rep_feedback = {
+                            "text": f"⚠️ Repetición {last_rep['rep']} fallida: {err}.",
+                            "type": "error",
+                        }
+                        feedback_placeholder.error(
+                            st.session_state.last_rep_feedback["text"]
+                        )
+                    last_history_len = len(current_history)
                 else:
-                    color = (0, 0, 255)  # Rojo: Bloqueo/Reposo
+                    # Guías dinámicas de ejecución continua
+                    if current_state == 1:
+                        feedback_placeholder.warning(
+                            "⬇️ Descendiendo... Mantén estabilidad y control."
+                        )
+                    elif current_state == 2:
+                        feedback_placeholder.warning(
+                            "🏋️‍♂️ Zona Profunda alcanzada. ¡Fuerza hacia arriba!"
+                        )
+                    elif current_state == 3:
+                        feedback_placeholder.warning(
+                            "⬆️ Ascendiendo... Controla la forma corporal."
+                        )
 
-                cv2.rectangle(
-                    frame_display,
-                    (bar_x, bar_y_top),
-                    (bar_x + bar_w, bar_y_bottom),
-                    (40, 40, 40),
-                    -1,
-                )
-                fill_level = int(bar_y_bottom - (progress * bar_height))
-                cv2.rectangle(
-                    frame_display,
-                    (bar_x, fill_level),
-                    (bar_x + bar_w, bar_y_bottom),
-                    color,
-                    -1,
-                )
-                cv2.putText(
-                    frame_display,
-                    f"{int(progress * 100)}%",
-                    (bar_x, bar_y_top - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    color,
-                    2,
-                    cv2.LINE_AA,
+                # Preparación y pintado de la capa gráfica
+                h_orig, w_orig = frame.shape[:2]
+                display_h = 480
+                display_w = int(display_h * (w_orig / h_orig))
+                frame_display = cv2.resize(
+                    frame, (display_w, display_h), interpolation=cv2.INTER_AREA
                 )
 
-                # Capa de telemetría secundaria: Inclinación instantánea del Torso
-                t_tilt = payload["metrics"].get("torso_tilt_deg", 0.0)
-                cv2.putText(
-                    frame_display,
-                    f"Torso: {t_tilt:.1f} Grad",
-                    (display_w - 180, display_h - 20),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (255, 255, 255),
-                    1,
-                    cv2.LINE_AA,
-                )
+                if results.world:
+                    st.session_state.detector.draw_landmarks(frame_display, results.raw)
 
-            frame_placeholder.image(frame_display, channels="BGR", width="stretch")
-            frame_idx += 1
+                    # Capa de la barra lateral sagital de progreso de profundidad
+                    angle = payload["metrics"]["knee_angle"]
+                    range_angle = u_thr - d_thr
+                    progress = np.clip((u_thr - angle) / range_angle, 0.0, 1.0)
 
-            # Reloj de Compensación Dinámica
-            if source_mode == "Cámara en vivo":
-                elapsed = time.time() - start_time
-                time.sleep(max(0.001, loop_delay - elapsed))
-            elif source_mode == "Archivo de vídeo (Debug)":
-                expected_timeline = frame_idx * loop_delay
-                actual_timeline = time.time() - video_start_time
-
-                if actual_timeline > expected_timeline:
-                    frames_to_skip = int(
-                        (actual_timeline - expected_timeline) / loop_delay
+                    bar_w, bar_x = int(display_w * 0.08), int(display_w * 0.05)
+                    bar_y_top, bar_y_bottom = (
+                        int(display_h * 0.25),
+                        int(display_h * 0.85),
                     )
-                    if frames_to_skip > 0:
-                        for _ in range(frames_to_skip):
-                            cap.grab()
-                        frame_idx += frames_to_skip
-                else:
-                    time.sleep(max(0.001, expected_timeline - actual_timeline))
+                    bar_height = bar_y_bottom - bar_y_top
 
-        cap.release()
-        if "cap" in st.session_state:
-            del st.session_state.cap
-        handle_video_cleanup(input_path)
+                    if current_state == 2:
+                        color = (0, 255, 0)  # Verde: Profundidad conseguida
+                    elif current_state in [1, 3]:
+                        color = (0, 255, 255)  # Amarillo: En transición
+                    else:
+                        color = (0, 0, 255)  # Rojo: Bloqueo/Reposo
+
+                    cv2.rectangle(
+                        frame_display,
+                        (bar_x, bar_y_top),
+                        (bar_x + bar_w, bar_y_bottom),
+                        (40, 40, 40),
+                        -1,
+                    )
+                    fill_level = int(bar_y_bottom - (progress * bar_height))
+                    cv2.rectangle(
+                        frame_display,
+                        (bar_x, fill_level),
+                        (bar_x + bar_w, bar_y_bottom),
+                        color,
+                        -1,
+                    )
+                    cv2.putText(
+                        frame_display,
+                        f"{int(progress * 100)}%",
+                        (bar_x, bar_y_top - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        color,
+                        2,
+                        cv2.LINE_AA,
+                    )
+
+                    # Capa de telemetría secundaria: Inclinación instantánea del Torso
+                    t_tilt = payload["metrics"].get("torso_tilt_deg", 0.0)
+                    cv2.putText(
+                        frame_display,
+                        f"Torso: {t_tilt:.1f} Grad",
+                        (display_w - 180, display_h - 20),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 255, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
+
+                frame_placeholder.image(frame_display, channels="BGR", width="stretch")
+                frame_idx += 1
+
+                # Reloj de Compensación Dinámica
+                if source_mode == "Cámara en vivo":
+                    elapsed = time.time() - start_time
+                    time.sleep(max(0.001, loop_delay - elapsed))
+                elif source_mode == "Archivo de vídeo (Debug)":
+                    expected_timeline = frame_idx * loop_delay
+                    actual_timeline = time.time() - video_start_time
+
+                    if actual_timeline > expected_timeline:
+                        frames_to_skip = int(
+                            (actual_timeline - expected_timeline) / loop_delay
+                        )
+                        if frames_to_skip > 0:
+                            for _ in range(frames_to_skip):
+                                cap.grab()
+                            frame_idx += frames_to_skip
+                    else:
+                        time.sleep(max(0.001, expected_timeline - actual_timeline))
+
+        finally:
+            cap.release()
+            if "cap" in st.session_state:
+                del st.session_state.cap
+            handle_video_cleanup(input_path)
     else:
         if "cap" in st.session_state:
             st.session_state.cap.release()
