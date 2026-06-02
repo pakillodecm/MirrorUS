@@ -63,16 +63,21 @@ class SquatAnalyzer:
         frame_errors = {}
         metrics = {"knee_angle": angle}
 
+        # Bucle dinámico sobre el registro de detectores inyectados
         for name, detector in self.detectors.items():
             if world_landmarks is not None:
-                has_error, ratio = detector.analyze(world_landmarks)
+                has_error, value = detector.analyze(world_landmarks)
                 frame_errors[name] = has_error
                 if name == "KNEE_VALGUS":
-                    metrics["valgus_ratio"] = ratio
+                    metrics["valgus_ratio"] = value
+                elif name == "TORSO_TILT":
+                    metrics["torso_tilt_deg"] = value
             else:
                 frame_errors[name] = False
                 if name == "KNEE_VALGUS":
                     metrics["valgus_ratio"] = 1.0
+                elif name == "TORSO_TILT":
+                    metrics["torso_tilt_deg"] = 0.0
 
         # 2. Motor de transiciones de la FSM Plenamente Bidireccional por Umbrales
         old_state = self.state
@@ -99,7 +104,6 @@ class SquatAnalyzer:
                 self.state = 0
                 state_changed = True
             elif self.state == 3 and angle <= self.depth_detector.down_threshold:
-                # Flecha de degradación: pérdida de control motor durante la subida
                 self.state = 1
                 self.current_rep_errors.add("MID_ASCENT_COLLAPSE")
                 state_changed = True
