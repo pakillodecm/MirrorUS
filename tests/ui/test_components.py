@@ -70,9 +70,7 @@ def test_render_sidebar_config_local_options(mock_st):
     mock_st.selectbox.return_value = "Alta Precisión (100% IA)"
     mock_st.slider.side_effect = [90, 150, 40]
 
-    source_mode, skip_mode, d_thr, u_thr, t_thr = render_sidebar_config(
-        is_local=True, session_id="test123"
-    )
+    source_mode, skip_mode, d_thr, u_thr, t_thr = render_sidebar_config(is_local=True)
 
     assert source_mode == "Cámara en vivo"
     assert skip_mode == "Alta Precisión (100% IA)"
@@ -92,9 +90,7 @@ def test_render_sidebar_config_cloud_no_camera(mock_st):
     mock_st.selectbox.return_value = "Equilibrado (66% IA)"
     mock_st.slider.side_effect = [90, 150, 40]
 
-    source_mode, skip_mode, d_thr, u_thr, t_thr = render_sidebar_config(
-        is_local=False, session_id="test123"
-    )
+    source_mode, skip_mode, d_thr, u_thr, t_thr = render_sidebar_config(is_local=False)
 
     assert source_mode == "Archivo de vídeo (Debug)"
 
@@ -113,7 +109,7 @@ def test_render_sidebar_config_slider_values(mock_st):
     mock_st.selectbox.return_value = "Alta Precisión (100% IA)"
     mock_st.slider.side_effect = [75, 165, 35]
 
-    _, _, d_thr, u_thr, t_thr = render_sidebar_config(is_local=True, session_id="abc")
+    _, _, d_thr, u_thr, t_thr = render_sidebar_config(is_local=True)
 
     assert d_thr == 75
     assert u_thr == 165
