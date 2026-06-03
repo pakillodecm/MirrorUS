@@ -46,3 +46,17 @@ def test_depth_detector_missing_data():
     is_deep, angle = detector.analyze(None)
     assert is_deep is False
     assert angle == 180.0
+
+
+def test_depth_detector_custom_visibility_threshold():
+    """Con visibilidad baja y umbral alto debe devolver None internamente
+    y retornar el valor de fallback (180.0).
+    """
+    detector = DepthDetector(
+        down_threshold=90.0,
+        up_threshold=160.0,
+        min_combined_visibility=1.99,
+    )
+    is_deep, angle = detector.analyze(create_mock_landmarks(85.0, vis=0.95))
+    assert is_deep is False
+    assert angle == 180.0

@@ -40,3 +40,16 @@ def test_filter_latency_on_step_change():
     assert (
         val_after_jump > 20.0
     ), f"El valor tras el salto ({val_after_jump}) debe ser mayor que 20.0"
+
+
+def test_filter_reset_clears_state():
+    """Después de reset() el filtro debe comportarse como recién inicializado."""
+    filt = OneEuroFilter(min_cutoff=1.0, beta=0.0)
+
+    filt.apply(50.0, t=0.0)
+    filt.apply(55.0, t=0.1)
+    filt.reset()
+
+    result = filt.apply(99.0, t=0.2)
+    assert result == 99.0
+    assert filt.t_prev == 0.2

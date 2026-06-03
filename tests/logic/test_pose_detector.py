@@ -36,3 +36,17 @@ def test_extract_landmarks_no_person():
 
     assert result.normalized is None, "No debería devolver landmarks normalizados"
     assert result.world is None, "No debería devolver world landmarks"
+
+
+def test_reset_filters_clears_state():
+    """Después de reset_filters() el diccionario de filtros debe estar vacío."""
+    detector = PoseDetector()
+
+    dummy_data = {"LEFT_KNEE": np.array([0.1, 0.2, 0.3, 0.9])}
+    detector._filter_dict(dummy_data, detector.filters_world)
+
+    assert len(detector.filters_world) > 0
+
+    detector.reset_filters()
+
+    assert len(detector.filters_world) == 0
