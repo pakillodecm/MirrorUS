@@ -9,10 +9,19 @@ from src.logic.valgus_detector import KneeValgusDetector
 def create_frame_data(
     angle_deg: float, hip_w: float, knee_w: float, vis: float = 0.95
 ) -> dict:
-    """Genera un esqueleto tridimensional con corrección de Pitágoras.
+    """Genera un esqueleto tridimensional con ángulo de rodilla controlado.
 
-    Garantiza que el ángulo 3D calculado sea exactamente 'angle_deg'
-    sin importar las variaciones de anchura en el eje X.
+    Usa corrección de Pitágoras para garantizar que el ángulo 3D calculado
+    sea exactamente 'angle_deg' independientemente de la anchura en el eje X.
+
+    Args:
+        angle_deg: Ángulo de rodilla deseado en grados.
+        hip_w: Anchura entre caderas en metros.
+        knee_w: Anchura entre rodillas en metros.
+        vis: Visibilidad aplicada a todos los landmarks (0.0 - 1.0).
+
+    Returns:
+        Diccionario de landmarks compatible con SquatAnalyzer.process_frame().
     """
     ankle = np.array([-knee_w / 2.0, 0.0, 0.0, vis])
     knee = np.array([-knee_w / 2.0, 0.5, 0.0, vis])
@@ -40,8 +49,14 @@ def create_frame_data(
 
 
 def test_analyzer_perfect_lifecycle():
-    """Verifica el ciclo completo de una repetición perfecta sin fallos
-    y valida la telemetría temporal de velocidad por fases.
+    """Verifica el ciclo completo de una repetición válida y su telemetría VBT.
+
+    Simula una sentadilla perfecta en 5 frames con timestamps controlados
+    y comprueba que:
+    - La FSM transita correctamente por los 4 estados (0→1→2→3→0).
+    - Se registra una repetición válida sin errores.
+    - Las duraciones de bajada y subida son exactas (1.5s y 2.0s).
+    - El historial persiste los datos de telemetría correctamente.
     """
     depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
     valgus = KneeValgusDetector(threshold=0.90)
@@ -49,63 +64,58 @@ def test_analyzer_perfect_lifecycle():
         depth_detector=depth, detectors={"KNEE_VALGUS": valgus}, hysteresis=5.0
     )
 
-    # 1. STAND (170 grados) en el segundo 0.0
     payload = analyzer.process_frame(
         create_frame_data(170.0, 0.40, 0.40), timestamp=0.0
     )
     assert payload["fsm_state"] == 0
 
-    # 2. DESCENDING (130 grados) en el segundo 1.0 -> Aquí arranca la bajada
     payload = analyzer.process_frame(
         create_frame_data(130.0, 0.40, 0.40), timestamp=1.0
     )
     assert payload["fsm_state"] == 1
 
-    # 3. DEEP (85 grados) en el segundo 2.5 -> Aquí termina la bajada (Duración = 1.5s)
     payload = analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40), timestamp=2.5)
     assert payload["fsm_state"] == 2
 
-    # 4. ASCENDING (120 grados) en el segundo 3.5 -> Aquí arranca la subida
     payload = analyzer.process_frame(
         create_frame_data(120.0, 0.40, 0.40), timestamp=3.5
     )
     assert payload["fsm_state"] == 3
 
-    # 5. STAND (160 grados) en el segundo 4.5 -> Fin de la subida (Duración = 2.0s)
     payload = analyzer.process_frame(
         create_frame_data(160.0, 0.40, 0.40), timestamp=4.5
     )
 
-    # VALIDACIONES DE TELEMETRÍA TEMPORAL (VBT):
     assert payload["fsm_state"] == 0
     assert payload["rep_valid_count"] == 1
-
-    # Exigimos las duraciones en las métricas del último ciclo
     assert pytest.approx(payload["metrics"]["descent_duration_sec"]) == 1.5
     assert pytest.approx(payload["metrics"]["ascent_duration_sec"]) == 2.0
 
-    # Exigimos que el historial guarde el reporte temporal de forma persistente
-    last_history = payload["session_history"][-1]
-    assert pytest.approx(last_history["descent_duration_sec"]) == 1.5
-    assert pytest.approx(last_history["ascent_duration_sec"]) == 2.0
+    last_rep = payload["session_history"][-1]
+    assert pytest.approx(last_rep["descent_duration_sec"]) == 1.5
+    assert pytest.approx(last_rep["ascent_duration_sec"]) == 2.0
 
 
 def test_analyzer_failed_lifecycle_with_valgus():
-    """Verifica que una repetición con colapso en el ascenso sea inválida."""
+    """Verifica que el valgo de rodilla durante el ascenso invalida la repetición.
+
+    Simula una sentadilla con rodillas colapsadas (knee_w < hip_w) en el frame
+    de ascenso y comprueba que el error KNEE_VALGUS queda registrado.
+    """
     depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
     valgus = KneeValgusDetector(threshold=0.90)
     analyzer = SquatAnalyzer(
         depth_detector=depth, detectors={"KNEE_VALGUS": valgus}, hysteresis=5.0
     )
 
-    analyzer.process_frame(create_frame_data(170.0, 0.40, 0.40))  # STAND
-    analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40))  # DESCENDING
-    analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40))  # DEEP
+    analyzer.process_frame(create_frame_data(170.0, 0.40, 0.40))
+    analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40))
+    analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40))
 
-    payload = analyzer.process_frame(create_frame_data(120.0, 0.40, 0.30))  # ASCENDING
+    payload = analyzer.process_frame(create_frame_data(120.0, 0.40, 0.30))
     assert payload["current_frame_errors"]["KNEE_VALGUS"] is True
 
-    payload = analyzer.process_frame(create_frame_data(160.0, 0.40, 0.40))  # STAND
+    payload = analyzer.process_frame(create_frame_data(160.0, 0.40, 0.40))
     assert payload["rep_valid_count"] == 0
     assert payload["rep_invalid_count"] == 1
     assert payload["session_history"][-1]["valid"] is False
@@ -113,7 +123,11 @@ def test_analyzer_failed_lifecycle_with_valgus():
 
 
 def test_analyzer_aborted_squat_no_depth():
-    """Verifica que una bajada parcial sea interceptada por 'NO_DEPTH'."""
+    """Verifica que una bajada parcial sin alcanzar profundidad se marca como NO_DEPTH.
+
+    Simula una sentadilla abortada a 105° (por encima del umbral de 90°)
+    y comprueba que la repetición se registra como inválida con error NO_DEPTH.
+    """
     depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
     valgus = KneeValgusDetector(threshold=0.90)
     analyzer = SquatAnalyzer(
@@ -136,9 +150,11 @@ def test_analyzer_aborted_squat_no_depth():
 
 
 def test_analyzer_ascent_collapse():
-    """Verifica que si el atleta vuelve a caer durante la subida, la FSM lo
+    """Verifica que una caída durante el ascenso se registra como MID_ASCENT_COLLAPSE.
 
-    degrade a la zona profunda y registre el fallo 'MID_ASCENT_COLLAPSE'.
+    Simula una sentadilla en la que el atleta vuelve a caer a zona profunda
+    durante el ascenso. La FSM debe degradar el estado a DEEP y registrar
+    el error MID_ASCENT_COLLAPSE al finalizar la repetición.
     """
     depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
     valgus = KneeValgusDetector(threshold=0.90)
@@ -146,9 +162,9 @@ def test_analyzer_ascent_collapse():
         depth_detector=depth, detectors={"KNEE_VALGUS": valgus}, hysteresis=5.0
     )
 
-    analyzer.process_frame(create_frame_data(170.0, 0.40, 0.40))  # STAND
-    analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40))  # DESCENDING
-    analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40))  # DEEP
+    analyzer.process_frame(create_frame_data(170.0, 0.40, 0.40))
+    analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40))
+    analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40))
 
     payload = analyzer.process_frame(create_frame_data(120.0, 0.40, 0.40))
     assert payload["fsm_state"] == 3
@@ -168,8 +184,10 @@ def test_analyzer_ascent_collapse():
 
 
 def test_analyzer_reset_counters():
-    """Verifica que reset_counters deja el estado interno completamente limpio
-    tras haber completado una repetición válida.
+    """Verifica que reset_counters() devuelve el estado interno a sus valores iniciales.
+
+    Ejecuta un ciclo completo para ensuciar el estado y comprueba que tras
+    el reset todos los contadores, cronómetros e historial quedan a cero.
     """
     depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
     valgus = KneeValgusDetector(threshold=0.90)
@@ -195,3 +213,66 @@ def test_analyzer_reset_counters():
     assert analyzer.time_reached_deep is None
     assert analyzer.last_descent_duration == 0.0
     assert analyzer.last_ascent_duration == 0.0
+
+
+def test_analyzer_feedback_unknown_state():
+    """Verifica que un estado FSM desconocido devuelve el mensaje genérico."""
+    depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
+    analyzer = SquatAnalyzer(depth_detector=depth, detectors={}, hysteresis=5.0)
+    analyzer.state = 99
+
+    assert analyzer._get_feedback_by_state() == "Analizando movimiento..."
+
+
+def test_analyzer_torso_tilt_detector_registered():
+    """Verifica que TORSO_TILT puebla correctamente la métrica torso_tilt_deg."""
+    from src.logic.torso_detector import TorsoTiltDetector
+
+    depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
+    torso = TorsoTiltDetector(max_tilt_deg=40.0)
+    analyzer = SquatAnalyzer(
+        depth_detector=depth,
+        detectors={"TORSO_TILT": torso},
+        hysteresis=5.0,
+    )
+    payload = analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40))
+
+    assert "torso_tilt_deg" in payload["metrics"]
+
+
+def test_analyzer_torso_tilt_none_landmarks():
+    """Verifica que con landmarks None el detector TORSO_TILT usa el valor por defecto.
+
+    Cuando no hay landmarks disponibles, el payload debe incluir torso_tilt_deg=0.0
+    sin lanzar ninguna excepción.
+    """
+    from src.logic.torso_detector import TorsoTiltDetector
+
+    depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
+    torso = TorsoTiltDetector(max_tilt_deg=40.0)
+    analyzer = SquatAnalyzer(
+        depth_detector=depth,
+        detectors={"TORSO_TILT": torso},
+        hysteresis=5.0,
+    )
+    payload = analyzer.process_frame(None)
+
+    assert payload["metrics"]["torso_tilt_deg"] == 0.0
+
+
+def test_analyzer_knee_valgus_none_landmarks():
+    """Verifica que con landmarks None el detector KNEE_VALGUS usa el valor por defecto.
+
+    Cuando no hay landmarks disponibles, el payload debe incluir valgus_ratio=1.0
+    sin lanzar ninguna excepción.
+    """
+    depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
+    valgus = KneeValgusDetector(threshold=0.90)
+    analyzer = SquatAnalyzer(
+        depth_detector=depth,
+        detectors={"KNEE_VALGUS": valgus},
+        hysteresis=5.0,
+    )
+    payload = analyzer.process_frame(None)
+
+    assert payload["metrics"]["valgus_ratio"] == 1.0
