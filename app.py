@@ -347,19 +347,19 @@ else:
                     elapsed = time.time() - start_time
                     time.sleep(max(0.001, loop_delay - elapsed))
                 elif source_mode == "Archivo de vídeo (Debug)":
-                    expected_timeline = frame_idx * loop_delay
-                    actual_timeline = time.time() - video_start_time
+                    elapsed = time.time() - video_start_time
+                    expected_frame_pos = int(elapsed * video_fps)
+                    current_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+                    frames_behind = expected_frame_pos - current_pos
 
-                    if actual_timeline > expected_timeline:
-                        frames_to_skip = int(
-                            (actual_timeline - expected_timeline) / loop_delay
-                        )
-                        if frames_to_skip > 0:
-                            for _ in range(frames_to_skip):
-                                cap.grab()
-                            frame_idx += frames_to_skip
+                    if frames_behind > 0:
+                        for _ in range(frames_behind):
+                            cap.grab()
+                        frame_idx += frames_behind
                     else:
-                        time.sleep(max(0.001, expected_timeline - actual_timeline))
+                        sleep_time = (current_pos / video_fps) - elapsed
+                        if sleep_time > 0.005:
+                            time.sleep(sleep_time)
 
         finally:
             cap.release()
