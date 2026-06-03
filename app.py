@@ -234,9 +234,6 @@ else:
 
                 if len(current_history) > last_history_len:
                     last_rep = current_history[-1]
-                    t_bajada = last_rep["descent_duration_sec"]
-                    t_subida = last_rep["ascent_duration_sec"]
-
                     if last_rep["valid"]:
                         st.session_state.last_rep_feedback = {
                             "text": f"✅ Repetición {last_rep['rep']} excelente.",
