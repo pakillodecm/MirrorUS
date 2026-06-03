@@ -14,14 +14,13 @@ def detect_runtime_env() -> bool:
     return True
 
 
-def render_sidebar_config(is_local: bool, session_id: str):
+def render_sidebar_config(is_local: bool):
     """Renderiza el panel lateral de configuración sin acoplamiento de estado interno.
 
     Maneja los sliders biomecánicos retornando valores primitivos de configuración.
 
     Args:
         is_local (bool): Indicador de entorno de ejecución.
-        session_id (str): Identificador único de la sesión actual.
 
     Returns:
         tuple: (source_mode, skip_mode, d_thr, u_thr, t_thr)

@@ -65,9 +65,7 @@ if "last_rep_feedback" not in st.session_state:
 is_local = detect_runtime_env()
 
 with st.sidebar:
-    source_mode, skip_mode, d_thr, u_thr, t_thr = render_sidebar_config(
-        is_local, st.session_state.session_id
-    )
+    source_mode, skip_mode, d_thr, u_thr, t_thr = render_sidebar_config(is_local)
 
 # Sincronización dinámica de los sliders del panel lateral con los detectores lógicos
 st.session_state.depth_detector.down_threshold = d_thr
