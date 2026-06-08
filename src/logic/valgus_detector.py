@@ -4,59 +4,53 @@ import numpy as np
 
 
 class KneeValgusDetector:
+    """Detecta el colapso medial de rodillas comparando anchos en el plano XZ."""
+
     def __init__(self, threshold: float = 0.90):
-        """Inicializa el detector de valgo de rodilla.
+        """Inicializa el detector.
 
         Args:
-            threshold (float): Umbral por debajo del cual se considera valgo.
-                              Por defecto es 0.90 (rodillas un 10% más juntas
-                              que las caderas).
+            threshold: Ratio mínimo rodillas/caderas antes de marcar valgo.
+                0.90 implica que las rodillas no deben estar más del 10% más
+                juntas que las caderas.
         """
         self.threshold = float(threshold)
 
     def analyze(
         self, world_landmarks: Optional[Dict[str, np.ndarray]]
     ) -> Tuple[bool, float]:
-        """Analiza el colapso de rodillas utilizando coordenadas métricas (eje X).
+        """Analiza el ratio de alineación rodillas/caderas en el plano XZ.
 
         Args:
-            world_landmarks (dict): Diccionario de landmarks de MediaPipe en
-                                    metros reales.
+            world_landmarks: Coordenadas world de MediaPipe, o None.
 
         Returns:
-            tuple: (is_valgus (bool), valgus_ratio (float))
+            Tupla (is_valgus, valgus_ratio). Devuelve (False, 1.0) si no hay
+            landmarks o la visibilidad es insuficiente.
         """
         if world_landmarks is None:
             return False, 1.0
-
         try:
-            # Extraemos los puntos críticos del plano frontal
             l_hip = world_landmarks["LEFT_HIP"]
             r_hip = world_landmarks["RIGHT_HIP"]
             l_knee = world_landmarks["LEFT_KNEE"]
             r_knee = world_landmarks["RIGHT_KNEE"]
 
-            # Filtro de confianza estructural mínimo para evitar falsos positivos
             if l_hip[3] < 0.5 or r_hip[3] < 0.5 or l_knee[3] < 0.5 or r_knee[3] < 0.5:
                 return False, 1.0
 
-            # Distancia horizontal real en el plano XZ (metros reales)
             hip_distance = np.sqrt(
                 (l_hip[0] - r_hip[0]) ** 2 + (l_hip[2] - r_hip[2]) ** 2
             )
-            knee_distance = np.sqrt(
-                (l_knee[0] - r_knee[0]) ** 2 + (l_knee[2] - r_knee[2]) ** 2
-            )
-
             if hip_distance == 0:
                 return False, 1.0
 
-            # Índice de alineación: proporción relativa entre rodillas y caderas
+            knee_distance = np.sqrt(
+                (l_knee[0] - r_knee[0]) ** 2 + (l_knee[2] - r_knee[2]) ** 2
+            )
             valgus_ratio = knee_distance / hip_distance
             is_valgus = bool(valgus_ratio < self.threshold)
-
             return is_valgus, valgus_ratio
 
         except KeyError:
-            # Mitigación segura si el diccionario viene incompleto en este frame
             return False, 1.0
