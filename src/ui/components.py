@@ -112,17 +112,9 @@ def _build_history_df(history: list) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# ---------------------------------------------------------------------------
-# MODAL DE HISTORIAL
-# ---------------------------------------------------------------------------
-
-
 @st.dialog("Historial analítico de la serie", width="large")
-def show_history_modal(history: list) -> None:
+def show_history_modal(history: list) -> None:  # pragma: no cover
     """Muestra el historial analítico en un modal nativo de Streamlit.
-
-    Requiere Streamlit >= 1.35. Muestra el DataFrame completo de la sesión
-    con métricas de velocidad VBT y errores por repetición.
 
     Args:
         history: Lista de RepRecord generada por SquatAnalyzer.
@@ -130,16 +122,7 @@ def show_history_modal(history: list) -> None:
     if not history:
         st.caption("Sin repeticiones registradas aún.")
         return
-    st.dataframe(
-        _build_history_df(history),
-        hide_index=True,
-        use_container_width=True,
-    )
-
-
-# ---------------------------------------------------------------------------
-# PANEL IZQUIERDO
-# ---------------------------------------------------------------------------
+    st.dataframe(_build_history_df(history), hide_index=True, use_container_width=True)
 
 
 def render_left_panel(
@@ -258,23 +241,26 @@ def render_sidebar_config(is_local: bool):
         st.caption("⚠️ Cámara no disponible en Cloud.")
 
     source_mode = st.radio("Fuente", options, index=0)
-
     skip_mode = st.selectbox(
         "Modo IA",
         [SKIP_FULL, SKIP_BALANCED, SKIP_PERFORMANCE],
         index=0 if is_local else 1,
     )
-
     st.caption("UMBRALES BIOMECÁNICOS")
-    d_thr = st.slider("Profundidad", 60, 110, 90)
-    u_thr = st.slider("Erguido", 130, 180, 150)
+    d_thr = st.slider("Profundidad", 70, 110, 90)
+    u_thr = st.slider("Erguido", 130, 170, 150)
     t_thr = st.slider("Torso (°)", 20, 60, 40)
 
     return source_mode, skip_mode, d_thr, u_thr, t_thr
 
 
 def render_header_and_instructions(is_local: bool, source_mode: str) -> None:
-    """Renderiza la cabecera y detiene si se detecta cámara en Cloud."""
+    """Renderiza la cabecera y detiene la ejecución si se detecta cámara en Cloud.
+
+    Args:
+        is_local: True si el entorno tiene acceso a cámara.
+        source_mode: Modo de fuente de entrada seleccionado en el sidebar.
+    """
     st.markdown(
         "#### 🏋️‍♂️ MirrorUS"
         '<span style="font-size:14px;color:#9aa1ab;'
