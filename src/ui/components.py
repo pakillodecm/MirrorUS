@@ -3,20 +3,12 @@ import os
 import pandas as pd
 import streamlit as st
 
-# ---------------------------------------------------------------------------
-# CONSTANTES DE CONFIGURACIÓN COMPARTIDAS
-# ---------------------------------------------------------------------------
-
 SKIP_FULL = "Alta Precisión (100%)"
 SKIP_BALANCED = "Equilibrado (66%)"
 SKIP_PERFORMANCE = "Máx. Rendimiento (50%)"
 
 SOURCE_CAMERA = "Cámara en vivo"
 SOURCE_FILE = "Archivo de vídeo"
-
-# ---------------------------------------------------------------------------
-# RANGOS DE REFERENCIA BIOMECÁNICA
-# ---------------------------------------------------------------------------
 
 _KNEE_OPTIMAL = 85.0
 _KNEE_PARALLEL = 90.0
@@ -46,25 +38,22 @@ _FSM_LABELS = {
     3: "⬆ Subiendo",
 }
 
+# Vocabulario cromático del estado FSM, compartido con el indicador HTML en app.py.
 _FSM_LINE_COLORS = {
-    0: "#9aa1ab",  # Gris: reposo
-    1: "#d97706",  # Ámbar: bajando
-    2: "#16a34a",  # Verde: zona profunda
-    3: "#0066cc",  # Azul: subiendo
+    0: "#9aa1ab",
+    1: "#d97706",
+    2: "#16a34a",
+    3: "#0066cc",
 }
 
 
-# ---------------------------------------------------------------------------
-# HELPERS
-# ---------------------------------------------------------------------------
-
-
 def _clamp01(value: float) -> float:
-    """Restringe un valor al intervalo [0.0, 1.0] exigido por st.progress."""
+    """Restringe value al intervalo [0.0, 1.0] requerido por st.progress."""
     return max(0.0, min(1.0, value))
 
 
 def _knee_semaphore(angle: float) -> str:
+    """Clasifica el ángulo de rodilla según los umbrales de profundidad."""
     if angle <= _KNEE_OPTIMAL:
         return "✓ Paralelo óptimo"
     if angle <= _KNEE_PARALLEL:
@@ -75,6 +64,7 @@ def _knee_semaphore(angle: float) -> str:
 
 
 def _torso_semaphore(tilt: float) -> str:
+    """Clasifica la inclinación del torso según los umbrales de tolerancia."""
     if tilt <= _TORSO_OPTIMAL:
         return "✓ Inclinación óptima"
     if tilt <= _TORSO_LIMIT:
@@ -83,6 +73,7 @@ def _torso_semaphore(tilt: float) -> str:
 
 
 def _valgus_semaphore(ratio: float) -> str:
+    """Clasifica el índice de valgo según los umbrales de alineación."""
     if ratio >= _VALGUS_GOOD:
         return "✓ Alineación correcta"
     if ratio >= _VALGUS_ALERT:
@@ -91,14 +82,14 @@ def _valgus_semaphore(ratio: float) -> str:
 
 
 def _vbt_caption(value: float, lo: float, hi: float) -> str:
-    """Pie VBT: estado si hay dato, referencia si no."""
+    """Texto de referencia VBT: estado si hay dato, rango si no lo hay."""
     if value <= 0:
         return f"Ref: {lo}–{hi} s"
     return "✓ Óptimo" if lo <= value <= hi else "⚠ Fuera de rango"
 
 
 def _build_history_df(history: list) -> pd.DataFrame:
-    """Construye el DataFrame del historial analítico."""
+    """Construye el DataFrame del historial analítico de la sesión."""
     rows = [
         {
             "Rep": r["rep"],
@@ -133,15 +124,19 @@ def render_left_panel(
     descent_sec: float,
     ascent_sec: float,
 ) -> None:
-    """Renderiza el panel izquierdo completo con componentes nativos Streamlit.
+    """Renderiza el panel izquierdo: estado FSM, contadores y telemetría VBT.
+
+    Sustituye el contenido del placeholder en cada llamada para permitir
+    actualización en vivo dentro del bucle de tracking sin acumular elementos.
 
     Args:
         placeholder: st.empty() de la columna izquierda.
-        fsm_state: Estado actual de la FSM (0–3).
-        rep_valid: Repeticiones válidas de la sesión.
-        rep_invalid: Repeticiones con fallo de la sesión.
-        descent_sec: Duración de la última bajada en segundos.
-        ascent_sec: Duración de la última subida en segundos.
+        fsm_state: Estado actual de la FSM (0=reposo, 1=bajando,
+            2=profundidad, 3=subiendo).
+        rep_valid: Repeticiones válidas acumuladas en la sesión.
+        rep_invalid: Repeticiones con fallo acumuladas en la sesión.
+        descent_sec: Duración de la última bajada (0.0 si no hay dato).
+        ascent_sec: Duración de la última subida (0.0 si no hay dato).
     """
     line_color = _FSM_LINE_COLORS.get(fsm_state, "#9aa1ab")
 
@@ -169,18 +164,16 @@ def render_left_panel(
             st.caption(_vbt_caption(ascent_sec, _VBT_ASCENT_MIN, _VBT_ASCENT_MAX))
 
 
-# ---------------------------------------------------------------------------
-# MÉTRICAS BIOMECÁNICAS
-# ---------------------------------------------------------------------------
-
-
 def render_bio_metrics(
     placeholder,
     knee_angle: float,
     torso_tilt: float,
     valgus_ratio: float,
 ) -> None:
-    """Renderiza el panel de métricas biomecánicas con barra de referencia.
+    """Renderiza las tres métricas biomecánicas en tiempo real.
+
+    Cada métrica combina valor numérico (st.metric), barra de posición sobre
+    el rango de referencia (st.progress) y clasificación semáforo (st.caption).
 
     Args:
         placeholder: st.empty() de ancho completo bajo las columnas.
@@ -194,43 +187,43 @@ def render_bio_metrics(
 
     with placeholder.container():
         m1, m2, m3 = st.columns(3)
-
         with m1:
             st.metric("📐 Ángulo de rodilla", f"{knee_angle:.1f}°")
             st.progress(knee_pct)
             st.caption(f"{_knee_semaphore(knee_angle)} · óptimo <85°")
-
         with m2:
             st.metric("📏 Inclinación torso", f"{torso_tilt:.1f}°")
             st.progress(torso_pct)
             st.caption(f"{_torso_semaphore(torso_tilt)} · óptimo <30°")
-
         with m3:
             st.metric("🦵 Índice de valgo", f"{valgus_ratio:.2f}")
             st.progress(valgus_pct)
             st.caption(f"{_valgus_semaphore(valgus_ratio)} · correcto >0.90")
 
 
-# ---------------------------------------------------------------------------
-# INFRAESTRUCTURA
-# ---------------------------------------------------------------------------
-
-
 def detect_runtime_env() -> bool:
-    """Detecta si la aplicación se ejecuta en local o en Streamlit Cloud."""
+    """Devuelve True si la app corre en local (cámara disponible).
+
+    Detecta Streamlit Cloud via la variable STREAMLIT_SHARING_REPOSITORY
+    o la ruta /mount/src presente en ese entorno.
+    """
     if os.environ.get("STREAMLIT_SHARING_REPOSITORY") or os.path.exists("/mount/src"):
         return False
     return True
 
 
 def render_sidebar_config(is_local: bool):
-    """Renderiza el panel lateral de configuración con componentes nativos.
+    """Renderiza el panel lateral de configuración.
+
+    El slider de umbral superior se limita a 170° para evitar que valores
+    próximos a 180° bloqueen la FSM (MediaPipe no devuelve exactamente 180°
+    en rodilla extendida, lo que haría imposible salir del estado STAND).
 
     Args:
         is_local: True si el entorno tiene acceso a cámara.
 
     Returns:
-        tuple: (source_mode, skip_mode, d_thr, u_thr, t_thr)
+        Tuple (source_mode, skip_mode, d_thr, u_thr, t_thr).
     """
     st.markdown("**⚙️ Configuración**")
 
@@ -277,7 +270,7 @@ def render_header_and_instructions(is_local: bool, source_mode: str) -> None:
 
 
 def handle_video_cleanup(input_path) -> None:
-    """Elimina de forma segura el archivo de vídeo temporal."""
+    """Elimina el archivo temporal de forma segura; no-op si input_path es int."""
     if isinstance(input_path, str) and os.path.exists(input_path):
         try:
             os.remove(input_path)
