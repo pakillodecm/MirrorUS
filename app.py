@@ -8,31 +8,171 @@ import cv2
 import numpy as np
 import streamlit as st
 
-# --- COMPONENTES ARQUITECTÓNICOS ---
 from src.logic.depth_detector import DepthDetector
 from src.logic.pose_detector import PoseDetector
 from src.logic.squat_analyzer import SquatAnalyzer
 from src.logic.torso_detector import TorsoTiltDetector
 from src.logic.valgus_detector import KneeValgusDetector
 from src.ui.components import (
+    SKIP_BALANCED,
+    SKIP_PERFORMANCE,
+    SOURCE_CAMERA,
+    SOURCE_FILE,
     detect_runtime_env,
     handle_video_cleanup,
+    render_bio_metrics,
     render_header_and_instructions,
+    render_left_panel,
     render_sidebar_config,
+    show_history_modal,
 )
 
-# 1. CONFIGURACIÓN E INICIALIZACIÓN PERSISTENTE
-st.set_page_config(page_title="MirrorUS", layout="centered")
+# ---------------------------------------------------------------------------
+# MAPA DE ARTICULACIONES POR ERROR
+# ---------------------------------------------------------------------------
+_ERROR_LANDMARK_MAP = {
+    "KNEE_VALGUS": ["LEFT_KNEE", "RIGHT_KNEE"],
+    "TORSO_TILT": [
+        "LEFT_SHOULDER",
+        "RIGHT_SHOULDER",
+        "LEFT_HIP",
+        "RIGHT_HIP",
+    ],
+}
 
-# Protocolo preventivo de limpieza en el arranque de la aplicación
+_DEPTH_STATE_CONFIG = {
+    0: ("#9aa1ab", "Reposo"),
+    1: ("#d97706", "⬇ Bajando"),
+    2: ("#16a34a", "✓ Zona profunda"),
+    3: ("#0066cc", "⬆ Subiendo"),
+}
+
+
+# ---------------------------------------------------------------------------
+# HELPERS DE RENDERIZADO
+# ---------------------------------------------------------------------------
+
+
+def _draw_skeleton_refined(frame, landmarks, mp_pose, frame_errors):
+    """Dibuja el esqueleto con codificación de color por error."""
+    h, w = frame.shape[:2]
+
+    error_indices = set()
+    for err_name, is_active in frame_errors.items():
+        if is_active and err_name in _ERROR_LANDMARK_MAP:
+            for lm_name in _ERROR_LANDMARK_MAP[err_name]:
+                error_indices.add(mp_pose.PoseLandmark[lm_name].value)
+
+    has_errors = bool(error_indices)
+    ok_color = (74, 163, 22)
+    err_color = (0, 0, 220)
+    dim_color = (140, 140, 140)
+    lm_list = landmarks.landmark
+
+    for conn in mp_pose.POSE_CONNECTIONS:
+        s, e = tuple(conn)
+        lm_s, lm_e = lm_list[s], lm_list[e]
+        if lm_s.visibility < 0.3 or lm_e.visibility < 0.3:
+            continue
+        pt_s = (int(lm_s.x * w), int(lm_s.y * h))
+        pt_e = (int(lm_e.x * w), int(lm_e.y * h))
+        if s in error_indices or e in error_indices:
+            cv2.line(frame, pt_s, pt_e, err_color, 3, cv2.LINE_AA)
+        else:
+            c = dim_color if has_errors else ok_color
+            cv2.line(frame, pt_s, pt_e, c, 2, cv2.LINE_AA)
+
+    for idx, lm in enumerate(lm_list):
+        if lm.visibility < 0.3:
+            continue
+        cx, cy = int(lm.x * w), int(lm.y * h)
+        if idx in error_indices:
+            cv2.circle(frame, (cx, cy), 8, err_color, -1, cv2.LINE_AA)
+            cv2.circle(frame, (cx, cy), 11, (255, 255, 255), 2, cv2.LINE_AA)
+        else:
+            c = dim_color if has_errors else ok_color
+            cv2.circle(frame, (cx, cy), 5, c, -1, cv2.LINE_AA)
+
+
+def _depth_indicator_html(progress: float, fsm_state: int) -> str:
+    """Genera el HTML del indicador de profundidad coloreado por fase FSM."""
+    color, label = _DEPTH_STATE_CONFIG.get(fsm_state, ("#9aa1ab", "—"))
+    pct = int(progress * 100)
+    return (
+        '<div style="margin-top:6px;">'
+        '<div style="display:flex;justify-content:space-between;'
+        f'font-size:11px;color:#6b7280;margin-bottom:4px;">'
+        f"<span>Profundidad</span>"
+        f'<span style="color:{color};font-weight:500;">'
+        f"{pct}%&nbsp;·&nbsp;{label}</span>"
+        "</div>"
+        '<div style="height:6px;background:#e1e4e9;'
+        'border-radius:3px;overflow:hidden;">'
+        f'<div style="width:{pct}%;height:6px;'
+        f'background:{color};border-radius:3px;"></div>'
+        "</div>"
+        "</div>"
+    )
+
+
+def _video_placeholder_html() -> str:
+    """Card oscura con esquinas de visor e instrucciones de posicionamiento."""
+    corner = (
+        "position:absolute;width:20px;height:20px;"
+        "border-color:#1e2738;border-style:solid;"
+    )
+    return (
+        '<div style="background:#0a0d12;border-radius:9px;'
+        "min-height:340px;display:flex;flex-direction:column;"
+        "align-items:center;justify-content:center;"
+        'border:0.5px solid #1a2030;position:relative;padding:28px;">'
+        f'<div style="{corner}top:14px;left:14px;'
+        'border-width:2px 0 0 2px;"></div>'
+        f'<div style="{corner}top:14px;right:14px;'
+        'border-width:2px 2px 0 0;"></div>'
+        f'<div style="{corner}bottom:14px;left:14px;'
+        'border-width:0 0 2px 2px;"></div>'
+        f'<div style="{corner}bottom:14px;right:14px;'
+        'border-width:0 2px 2px 0;"></div>'
+        '<div style="font-size:10px;color:#2e3848;font-weight:600;'
+        "letter-spacing:0.18em;text-transform:uppercase;"
+        'margin-bottom:26px;font-family:monospace;">Sin señal de vídeo</div>'
+        '<div style="display:flex;flex-direction:column;gap:10px;">'
+        '<div style="font-size:11px;color:#2e3d52;letter-spacing:0.02em;">'
+        "&mdash;&nbsp; Posicionate frente a la cámara</div>"
+        '<div style="font-size:11px;color:#2e3d52;letter-spacing:0.02em;">'
+        "&mdash;&nbsp; Distancia recomendada: 2 a 3 metros</div>"
+        '<div style="font-size:11px;color:#2e3d52;letter-spacing:0.02em;">'
+        "&mdash;&nbsp; Pies completamente visibles en el encuadre</div>"
+        '<div style="font-size:11px;color:#2e3d52;letter-spacing:0.02em;">'
+        "&mdash;&nbsp; Iluminación frontal uniforme, sin contraluz</div>"
+        "</div>"
+        "</div>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 1. CONFIGURACIÓN GLOBAL
+# ---------------------------------------------------------------------------
+st.set_page_config(page_title="MirrorUS", layout="wide")
+
+# Reducción del padding superior por defecto de Streamlit
+st.markdown(
+    "<style>.block-container{padding-top:2rem!important;}</style>",
+    unsafe_allow_html=True,
+)
+
 if "startup_purged" not in st.session_state:
-    for residual_file in glob.glob("./temp_*"):
+    for residual in glob.glob("./temp_*"):
         try:
-            os.remove(residual_file)
+            os.remove(residual)
         except OSError:
             pass
     st.session_state.startup_purged = True
 
+# ---------------------------------------------------------------------------
+# 2. INICIALIZACIÓN PERSISTENTE DE DETECTORES
+# ---------------------------------------------------------------------------
 if "detector" not in st.session_state:
     st.session_state.detector = PoseDetector()
 if "depth_detector" not in st.session_state:
@@ -55,39 +195,40 @@ if "session_id" not in st.session_state:
 if "last_valid_results" not in st.session_state:
     st.session_state.last_valid_results = None
 
-# Sincronización del estado visual y feedback
-if "last_rep_feedback" not in st.session_state:
-    st.session_state.last_rep_feedback = {
-        "text": "Esperando repeticiones...",
-        "type": "info",
-    }
-
+# ---------------------------------------------------------------------------
+# 3. SIDEBAR Y SINCRONIZACIÓN
+# ---------------------------------------------------------------------------
 is_local = detect_runtime_env()
 
 with st.sidebar:
     source_mode, skip_mode, d_thr, u_thr, t_thr = render_sidebar_config(is_local)
 
-# Sincronización dinámica de los sliders del panel lateral con los detectores lógicos
 st.session_state.depth_detector.down_threshold = d_thr
 st.session_state.depth_detector.up_threshold = u_thr
 st.session_state.torso_detector.max_tilt_deg = t_thr
 
+# ---------------------------------------------------------------------------
+# 4. CABECERA
+# ---------------------------------------------------------------------------
 render_header_and_instructions(is_local, source_mode)
 
-# --- GESTIÓN CENTRALIZADA DE ENTRADAS MULTIMEDIA ---
+# ---------------------------------------------------------------------------
+# 5. GESTIÓN DE ENTRADA MULTIMEDIA
+# ---------------------------------------------------------------------------
+video_file = None
 input_path = None
 do_flip = True
-video_file = None
 
-if source_mode == "Archivo de vídeo (Debug)":
+if source_mode == SOURCE_FILE:
     video_file = st.file_uploader(
-        "Sube un vídeo de tu sentadilla", type=["mp4", "mov", "avi"]
+        "Sube un vídeo de tu sentadilla",
+        type=["mp4", "mov", "avi"],
+        label_visibility="collapsed",
     )
     if video_file:
-        f_extension = os.path.splitext(video_file.name)[1]
+        f_ext = os.path.splitext(video_file.name)[1]
         f_sign = hashlib.md5(video_file.name.encode()).hexdigest()[:6]
-        input_path = f"./temp_{st.session_state.session_id}_{f_sign}{f_extension}"
-
+        input_path = f"./temp_{st.session_state.session_id}_{f_sign}{f_ext}"
         if not os.path.exists(input_path):
             with open(input_path, "wb") as f:
                 f.write(video_file.read())
@@ -96,7 +237,11 @@ else:
     input_path = 0
     do_flip = True
 
-# --- SENSOR DE MUTACIÓN ADAPTATIVO ---
+file_missing = source_mode == SOURCE_FILE and not video_file
+
+# ---------------------------------------------------------------------------
+# 6. SENSOR DE MUTACIÓN
+# ---------------------------------------------------------------------------
 if "prev_source" not in st.session_state:
     st.session_state.prev_source = source_mode
 if "prev_path" not in st.session_state:
@@ -107,268 +252,201 @@ if (
     or input_path != st.session_state.prev_path
 ):
     st.session_state.run_btn = False
-
     if "cap" in st.session_state:
         st.session_state.cap.release()
         del st.session_state.cap
     st.session_state.last_valid_results = None
     st.session_state.analyzer.reset_counters()
     st.session_state.detector.reset_filters()
-    st.session_state.last_rep_feedback = {
-        "text": "Sistema listo. Esperando inicio...",
-        "type": "info",
-    }
-
     if st.session_state.prev_path and isinstance(st.session_state.prev_path, str):
         handle_video_cleanup(st.session_state.prev_path)
-
     st.session_state.prev_source = source_mode
     st.session_state.prev_path = input_path
     st.rerun()
 
-# --- CONTROLADOR DE VISIBILIDAD REACTIVO POR UX ---
-if source_mode == "Archivo de vídeo (Debug)" and not video_file:
-    st.warning("Por favor, sube un archivo de vídeo para continuar.")
-else:
-    run = st.checkbox("🔥 Iniciar Seguimiento", key="run_btn")
+# ---------------------------------------------------------------------------
+# 7. LAYOUT PRINCIPAL
+# ---------------------------------------------------------------------------
+run = st.checkbox(
+    "🔥 Iniciar Seguimiento",
+    key="run_btn",
+    disabled=file_missing,
+)
 
-    # Contenedores dinámicos del Front
-    feedback_placeholder = st.empty()
-    metrics_cols = st.columns(2)
-    rep_valid_metric = metrics_cols[0].empty()
-    rep_invalid_metric = metrics_cols[1].empty()
+col_panel, col_video = st.columns([0.38, 0.62])
 
+with col_panel:
+    left_placeholder = st.empty()
+
+with col_video:
     frame_placeholder = st.empty()
+    depth_indicator_ph = st.empty()
 
-    # Marcadores estáticos iniciales para evitar parpadeos
-    rep_valid_metric.metric(
-        "👍 REPETICIONES VÁLIDAS", st.session_state.analyzer.count_valid
-    )
-    rep_invalid_metric.metric(
-        "❌ REPETICIONES CON FALLO", st.session_state.analyzer.count_invalid
-    )
+bio_placeholder = st.empty()
 
-    if st.session_state.last_rep_feedback["type"] == "error":
-        feedback_placeholder.error(st.session_state.last_rep_feedback["text"])
-    elif st.session_state.last_rep_feedback["type"] == "success":
-        feedback_placeholder.success(st.session_state.last_rep_feedback["text"])
+if st.button(
+    "📊 Ver historial analítico de la serie",
+):
+    show_history_modal(st.session_state.analyzer.history)
+
+# Render del estado inicial
+render_left_panel(
+    left_placeholder,
+    fsm_state=0,
+    rep_valid=st.session_state.analyzer.count_valid,
+    rep_invalid=st.session_state.analyzer.count_invalid,
+    descent_sec=0.0,
+    ascent_sec=0.0,
+)
+render_bio_metrics(bio_placeholder, 180.0, 0.0, 1.0)
+depth_indicator_ph.markdown(_depth_indicator_html(0.0, 0), unsafe_allow_html=True)
+
+if file_missing:
+    with frame_placeholder.container():
+        st.warning("Sube un vídeo usando el selector de arriba para continuar.")
+else:
+    if not run:
+        frame_placeholder.markdown(_video_placeholder_html(), unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# 8. BUCLE DE TRACKING
+# ---------------------------------------------------------------------------
+if run and not file_missing:
+    backend = cv2.CAP_DSHOW if source_mode == SOURCE_CAMERA else cv2.CAP_ANY
+
+    if "cap" not in st.session_state:
+        st.session_state.cap = cv2.VideoCapture(input_path, backend)
+        if source_mode == SOURCE_CAMERA:
+            st.session_state.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            st.session_state.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            st.session_state.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    cap = st.session_state.cap
+
+    if source_mode == SOURCE_CAMERA:
+        loop_delay = 0.01
     else:
-        feedback_placeholder.info(st.session_state.last_rep_feedback["text"])
+        video_fps = cap.get(cv2.CAP_PROP_FPS)
+        if video_fps <= 0 or np.isnan(video_fps):
+            video_fps = 30.0
+        loop_delay = 1.0 / video_fps
 
-    # 2. CONTROLADOR DE FLUJO (ORQUESTADOR ESTABLE)
-    if run:
-        backend = cv2.CAP_DSHOW if source_mode == "Cámara en vivo" else cv2.CAP_ANY
+    _mp_pose = st.session_state.detector.mp_pose
 
-        if "cap" not in st.session_state:
-            st.session_state.cap = cv2.VideoCapture(input_path, backend)
-            if source_mode == "Cámara en vivo":
-                st.session_state.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-                st.session_state.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-                st.session_state.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    frame_idx = 0
+    video_start_time = None
 
-        cap = st.session_state.cap
+    try:
+        while run:
+            start_time = time.time()
 
-        if source_mode == "Cámara en vivo":
-            loop_delay = 0.01
-        else:
-            video_fps = cap.get(cv2.CAP_PROP_FPS)
-            if video_fps <= 0 or np.isnan(video_fps):
-                video_fps = 30.0
-            loop_delay = 1.0 / video_fps
+            if frame_idx == 0 and source_mode != SOURCE_CAMERA:
+                video_start_time = time.time()
 
-        frame_idx = 0
-        video_start_time = None
-        last_history_len = len(st.session_state.analyzer.history)
-
-        try:
-            while run:
-                start_time = time.time()
-
-                if frame_idx == 0 and source_mode != "Cámara en vivo":
+            ret, frame = cap.read()
+            if not ret:
+                if source_mode == SOURCE_FILE:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    frame_idx = 0
                     video_start_time = time.time()
+                    continue
+                else:
+                    break
 
-                ret, frame = cap.read()
-                if not ret:
-                    if source_mode == "Archivo de vídeo (Debug)":
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                        frame_idx = 0
-                        video_start_time = time.time()
-                        continue
-                    else:
-                        break
+            if do_flip:
+                frame = cv2.flip(frame, 1)
 
-                if do_flip:
-                    frame = cv2.flip(frame, 1)
+            should_skip = False
+            if skip_mode == SKIP_BALANCED:
+                should_skip = frame_idx % 3 == 2
+            elif skip_mode == SKIP_PERFORMANCE:
+                should_skip = frame_idx % 2 == 1
 
-                should_skip = False
-                if skip_mode == "Equilibrado (66% IA)":
-                    if frame_idx % 3 == 2:  # Patrón 1 1 0 1 1 0
-                        should_skip = True
-                elif skip_mode == "Máximo Rendimiento (50% IA)":
-                    if frame_idx % 2 == 1:  # Patrón 1 0 1 0 1 0
-                        should_skip = True
-
-                if not should_skip:
+            if not should_skip:
+                results = st.session_state.detector.extract_landmarks(frame)
+                st.session_state.last_valid_results = results
+            else:
+                results = st.session_state.last_valid_results
+                if results is None:
                     results = st.session_state.detector.extract_landmarks(frame)
                     st.session_state.last_valid_results = results
+
+            payload = st.session_state.analyzer.process_frame(results.world)
+            current_state = payload["fsm_state"]
+            metrics = payload["metrics"]
+            frame_errors = payload["current_frame_errors"]
+
+            render_left_panel(
+                left_placeholder,
+                fsm_state=current_state,
+                rep_valid=payload["rep_valid_count"],
+                rep_invalid=payload["rep_invalid_count"],
+                descent_sec=metrics.get("descent_duration_sec", 0.0),
+                ascent_sec=metrics.get("ascent_duration_sec", 0.0),
+            )
+
+            render_bio_metrics(
+                bio_placeholder,
+                metrics.get("knee_angle", 180.0),
+                metrics.get("torso_tilt_deg", 0.0),
+                metrics.get("valgus_ratio", 1.0),
+            )
+
+            h_orig, w_orig = frame.shape[:2]
+            display_h = 480
+            display_w = int(display_h * (w_orig / h_orig))
+            frame_display = cv2.resize(
+                frame, (display_w, display_h), interpolation=cv2.INTER_AREA
+            )
+
+            if results.world:
+                _draw_skeleton_refined(
+                    frame_display,
+                    results.raw.pose_landmarks,
+                    _mp_pose,
+                    frame_errors,
+                )
+
+            frame_placeholder.image(
+                frame_display, channels="BGR", use_container_width=True
+            )
+
+            angle = metrics.get("knee_angle", 180.0)
+            range_angle = max(u_thr - d_thr, 1)
+            progress = float(np.clip((u_thr - angle) / range_angle, 0.0, 1.0))
+            depth_indicator_ph.markdown(
+                _depth_indicator_html(progress, current_state),
+                unsafe_allow_html=True,
+            )
+
+            frame_idx += 1
+
+            if source_mode == SOURCE_CAMERA:
+                elapsed = time.time() - start_time
+                time.sleep(max(0.001, loop_delay - elapsed))
+            else:
+                elapsed = time.time() - video_start_time
+                expected = int(elapsed * video_fps)
+                current_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+                behind = expected - current_pos
+                if behind > 0:
+                    for _ in range(behind):
+                        cap.grab()
+                    frame_idx += behind
                 else:
-                    results = st.session_state.last_valid_results
-                    if results is None:
-                        results = st.session_state.detector.extract_landmarks(frame)
-                        st.session_state.last_valid_results = results
+                    sleep_t = (current_pos / video_fps) - elapsed
+                    if sleep_t > 0.005:
+                        time.sleep(sleep_t)
 
-                # CONSUMO DEL BACKEND A TRAVÉS DE UN ÚNICO PAYLOAD GENÉRICO
-                payload = st.session_state.analyzer.process_frame(results.world)
-                current_state = payload["fsm_state"]
-                current_history = payload["session_history"]
-
-                # Actualización en tiempo real de marcadores de rendimiento en el Front
-                rep_valid_metric.metric(
-                    "👍 REPETICIONES VÁLIDAS", payload["rep_valid_count"]
-                )
-                rep_invalid_metric.metric(
-                    "❌ REPETICIONES CON FALLO", payload["rep_invalid_count"]
-                )
-
-                if len(current_history) > last_history_len:
-                    last_rep = current_history[-1]
-                    if last_rep["valid"]:
-                        st.session_state.last_rep_feedback = {
-                            "text": f"✅ Repetición {last_rep['rep']} excelente.",
-                            "type": "success",
-                        }
-                        feedback_placeholder.success(
-                            st.session_state.last_rep_feedback["text"]
-                        )
-                    else:
-                        err = ", ".join(last_rep["errors"])
-                        st.session_state.last_rep_feedback = {
-                            "text": f"⚠️ Repetición {last_rep['rep']} fallida: {err}.",
-                            "type": "error",
-                        }
-                        feedback_placeholder.error(
-                            st.session_state.last_rep_feedback["text"]
-                        )
-                    last_history_len = len(current_history)
-                else:
-                    # Guías dinámicas de ejecución continua
-                    if current_state == 1:
-                        feedback_placeholder.warning(
-                            "⬇️ Descendiendo... Mantén estabilidad y control."
-                        )
-                    elif current_state == 2:
-                        feedback_placeholder.warning(
-                            "🏋️‍♂️ Zona Profunda alcanzada. ¡Fuerza hacia arriba!"
-                        )
-                    elif current_state == 3:
-                        feedback_placeholder.warning(
-                            "⬆️ Ascendiendo... Controla la forma corporal."
-                        )
-
-                # Preparación y pintado de la capa gráfica
-                h_orig, w_orig = frame.shape[:2]
-                display_h = 480
-                display_w = int(display_h * (w_orig / h_orig))
-                frame_display = cv2.resize(
-                    frame, (display_w, display_h), interpolation=cv2.INTER_AREA
-                )
-
-                if results.world:
-                    st.session_state.detector.draw_landmarks(frame_display, results.raw)
-
-                    # Capa de la barra lateral sagital de progreso de profundidad
-                    angle = payload["metrics"]["knee_angle"]
-                    range_angle = u_thr - d_thr
-                    progress = np.clip((u_thr - angle) / range_angle, 0.0, 1.0)
-
-                    bar_w, bar_x = int(display_w * 0.08), int(display_w * 0.05)
-                    bar_y_top, bar_y_bottom = (
-                        int(display_h * 0.25),
-                        int(display_h * 0.85),
-                    )
-                    bar_height = bar_y_bottom - bar_y_top
-
-                    if current_state == 2:
-                        color = (0, 255, 0)  # Verde: Profundidad conseguida
-                    elif current_state in [1, 3]:
-                        color = (0, 255, 255)  # Amarillo: En transición
-                    else:
-                        color = (0, 0, 255)  # Rojo: Bloqueo/Reposo
-
-                    cv2.rectangle(
-                        frame_display,
-                        (bar_x, bar_y_top),
-                        (bar_x + bar_w, bar_y_bottom),
-                        (40, 40, 40),
-                        -1,
-                    )
-                    fill_level = int(bar_y_bottom - (progress * bar_height))
-                    cv2.rectangle(
-                        frame_display,
-                        (bar_x, fill_level),
-                        (bar_x + bar_w, bar_y_bottom),
-                        color,
-                        -1,
-                    )
-                    cv2.putText(
-                        frame_display,
-                        f"{int(progress * 100)}%",
-                        (bar_x, bar_y_top - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6,
-                        color,
-                        2,
-                        cv2.LINE_AA,
-                    )
-
-                    # Capa de telemetría secundaria: Inclinación instantánea del Torso
-                    t_tilt = payload["metrics"].get("torso_tilt_deg", 0.0)
-                    cv2.putText(
-                        frame_display,
-                        f"Torso: {t_tilt:.1f} Grad",
-                        (display_w - 180, display_h - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (255, 255, 255),
-                        1,
-                        cv2.LINE_AA,
-                    )
-
-                frame_placeholder.image(frame_display, channels="BGR", width="stretch")
-                frame_idx += 1
-
-                # Reloj de Compensación Dinámica
-                if source_mode == "Cámara en vivo":
-                    elapsed = time.time() - start_time
-                    time.sleep(max(0.001, loop_delay - elapsed))
-                elif source_mode == "Archivo de vídeo (Debug)":
-                    elapsed = time.time() - video_start_time
-                    expected_frame_pos = int(elapsed * video_fps)
-                    current_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
-                    frames_behind = expected_frame_pos - current_pos
-
-                    if frames_behind > 0:
-                        for _ in range(frames_behind):
-                            cap.grab()
-                        frame_idx += frames_behind
-                    else:
-                        sleep_time = (current_pos / video_fps) - elapsed
-                        if sleep_time > 0.005:
-                            time.sleep(sleep_time)
-
-        finally:
-            cap.release()
-            if "cap" in st.session_state:
-                del st.session_state.cap
-            handle_video_cleanup(input_path)
-    else:
+    finally:
+        cap.release()
         if "cap" in st.session_state:
-            st.session_state.cap.release()
             del st.session_state.cap
         handle_video_cleanup(input_path)
 
-    # --- HISTORIAL DESPLEGABLE DE RENDIMIENTO DE SESIÓN ---
-    if st.session_state.analyzer.history:
-        st.divider()
-        st.subheader("📊 Historial Analítico de la Serie (VBT & Postura)")
-        st.dataframe(st.session_state.analyzer.history, use_container_width=True)
+else:
+    if "cap" in st.session_state:
+        st.session_state.cap.release()
+        del st.session_state.cap
+    if not file_missing:
+        handle_video_cleanup(input_path)
