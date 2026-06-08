@@ -7,6 +7,8 @@ from src.logic.depth_detector import DepthDetector
 
 
 class RepRecord(TypedDict):
+    """Registro de una repetición completada."""
+
     rep: int
     valid: bool
     errors: List[str]
@@ -15,56 +17,51 @@ class RepRecord(TypedDict):
 
 
 class FramePayload(TypedDict):
+    """Payload estructurado que el frontend consume tras cada fotograma."""
+
     rep_valid_count: int
     rep_invalid_count: int
     fsm_state: int
-    feedback_message: str
     current_frame_errors: Dict[str, bool]
     metrics: Dict[str, float]
     session_history: List[RepRecord]
 
 
 class SquatAnalyzer:
+    """Orquestador de la FSM, telemetría VBT y detección de errores posturales."""
+
     def __init__(
-        self, depth_detector: DepthDetector, detectors: dict, hysteresis: float = 10.0
+        self,
+        depth_detector: DepthDetector,
+        detectors: dict,
+        hysteresis: float = 10.0,
+        timeout_sec: float = 8.0,
     ):
-        """Orquestador central del ciclo de vida, calidad y velocidad de la sentadilla.
+        """Inicializa el analizador con los detectores y parámetros de control.
 
         Args:
-            depth_detector (DepthDetector): Sensor del plano sagital.
-            detectors (dict): Registro de detectores de fallos posturales.
-            hysteresis (float): Ventana de mitigación de ruido para transiciones.
+            depth_detector: Sensor del ángulo de rodilla en el plano sagital.
+            detectors: Registro de detectores de fallos posturales frame-level.
+            hysteresis: Ventana en grados para suavizar transiciones de la FSM.
+            timeout_sec: Segundos máximos en estado DESCENDING antes de cerrar
+                la repetición automáticamente con NO_DEPTH. Evita que la FSM
+                quede bloqueada con thresholds extremos o movimientos abortados.
         """
         self.depth_detector = depth_detector
         self.detectors = detectors
         self.hysteresis = float(hysteresis)
+        self.timeout_sec = float(timeout_sec)
 
-        # Variables de estado e historial
         self.state = 0  # 0: STAND, 1: DESCENDING, 2: DEEP, 3: ASCENDING
         self.count_valid = 0
         self.count_invalid = 0
-        self.current_rep_errors = set()
-        self.history = []
+        self.current_rep_errors: set = set()
+        self.history: List[RepRecord] = []
 
-        # Anclas de tiempo absoluto para telemetría de velocidad (VBT)
-        self.time_start_descent = None
-        self.time_reached_deep = None
-
-        # Almacenamiento persistente del último ciclo completado
+        self.time_start_descent: Optional[float] = None
+        self.time_reached_deep: Optional[float] = None
         self.last_descent_duration = 0.0
         self.last_ascent_duration = 0.0
-
-    def _get_feedback_by_state(self) -> str:
-        """Determina el mensaje textual de guía según el estado de la FSM."""
-        if self.state == 0:
-            return "Sistema listo. Esperando inicio de la bajada..."
-        elif self.state == 1:
-            return "⬇️ Descendiendo... Mantén las rodillas alineadas hacia fuera."
-        elif self.state == 2:
-            return "🏋️ Zona Profunda alcanzada. ¡Buen paralelo! Inicia el ascenso."
-        elif self.state == 3:
-            return "⬆️ Ascendiendo... Controla la estabilidad y empuja el suelo."
-        return "Analizando movimiento..."
 
     def reset_counters(self) -> None:
         """Reinicia el estado interno, cronómetros e historial de la sesión."""
@@ -83,25 +80,26 @@ class SquatAnalyzer:
         world_landmarks: Optional[Dict[str, np.ndarray]],
         timestamp: Optional[float] = None,
     ) -> FramePayload:
-        """Procesa el fotograma actual ejecutando la lógica analítica y temporal.
+        """Procesa un fotograma y devuelve el payload estructurado para el frontend.
+
+        Ejecuta en orden: detección de sensores, transiciones de FSM,
+        timeout de descenso, gestión de errores y cierre de repetición.
 
         Args:
-            world_landmarks (dict): Coordenadas métricas del sujeto.
-            timestamp (float, opcional): Marca de tiempo para simulaciones de test.
+            world_landmarks: Coordenadas métricas de MediaPipe, o None si
+                la detección falló en este fotograma.
+            timestamp: Marca de tiempo en segundos; si es None usa time.time().
 
         Returns:
-            dict: Payload estructurado genérico para el frontend.
+            FramePayload con el estado completo de la sesión.
         """
-        # Si no se proporciona un timestamp, usamos el reloj del sistema
         current_time = float(timestamp) if timestamp is not None else time.time()
 
-        # 1. Consulta analítica a los sensores geométricos instantáneos
+        # 1. Sensores geométricos instantáneos
         is_deep, angle = self.depth_detector.analyze(world_landmarks)
+        frame_errors: Dict[str, bool] = {}
+        metrics: Dict[str, float] = {"knee_angle": angle}
 
-        frame_errors = {}
-        metrics = {"knee_angle": angle}
-
-        # Bucle dinámico sobre el registro de detectores inyectados
         for name, detector in self.detectors.items():
             if world_landmarks is not None:
                 has_error, value = detector.analyze(world_landmarks)
@@ -117,7 +115,7 @@ class SquatAnalyzer:
                 elif name == "TORSO_TILT":
                     metrics["torso_tilt_deg"] = 0.0
 
-        # 2. Motor de transiciones de la FSM con captura de marcas temporales
+        # 2. Transiciones de la FSM con histéresis
         old_state = self.state
         state_changed = True
         while state_changed:
@@ -126,13 +124,11 @@ class SquatAnalyzer:
                 self.depth_detector.up_threshold - self.hysteresis
             ):
                 self.state = 1
-                self.time_start_descent = current_time  # ANCLA: Inicio de la repetición
+                self.time_start_descent = current_time
                 state_changed = True
             elif self.state == 1 and is_deep:
                 self.state = 2
-                self.time_reached_deep = (
-                    current_time  # ANCLA: Fin de bajada / Inicio de subida
-                )
+                self.time_reached_deep = current_time
                 state_changed = True
             elif self.state == 1 and angle >= self.depth_detector.up_threshold:
                 self.state = 0
@@ -150,19 +146,30 @@ class SquatAnalyzer:
                 self.current_rep_errors.add("MID_ASCENT_COLLAPSE")
                 state_changed = True
 
-        # 3. Gestión del ciclo de vida de los errores de la repetición
+        # 3. Timeout de descenso: cierra la rep si el atleta lleva demasiado
+        # tiempo en DESCENDING sin alcanzar profundidad.
+        if (
+            self.state == 1
+            and self.time_start_descent is not None
+            and (current_time - self.time_start_descent) > self.timeout_sec
+        ):
+            self.state = 0
+
+        # 4. Ciclo de vida de errores por repetición
         if old_state == 0 and self.state != 0:
             self.current_rep_errors = set()
 
-        if self.state in [1, 2, 3]:
+        if self.state in (1, 2, 3):
             for name, is_active in frame_errors.items():
                 if is_active:
                     self.current_rep_errors.add(name)
 
-        # 4. Cierre del ciclo de movimiento: Cálculo definitivo de duraciones (VBT)
-        if (old_state == 3 and self.state == 0) or (old_state == 1 and self.state == 0):
+        # 5. Cierre del ciclo: VBT y registro en historial
+        rep_just_closed = (old_state == 3 and self.state == 0) or (
+            old_state == 1 and self.state == 0
+        )
+        if rep_just_closed:
             rep_idx = len(self.history) + 1
-
             if old_state == 1:
                 self.current_rep_errors.add("NO_DEPTH")
                 self.last_descent_duration = (
@@ -172,7 +179,6 @@ class SquatAnalyzer:
                 )
                 self.last_ascent_duration = 0.0
             else:
-                # Caso normal: tramos diferenciados por los checkpoints cronometrados
                 self.last_descent_duration = (
                     self.time_reached_deep - self.time_start_descent
                     if (self.time_reached_deep and self.time_start_descent)
@@ -208,7 +214,7 @@ class SquatAnalyzer:
                 )
             self.current_rep_errors = set()
 
-        # 5. Inyección de duraciones instantáneas en métricas de control continuo
+        # 6. Duraciones instantáneas para el indicador de profundidad en tiempo real
         metrics["descent_duration_sec"] = self.last_descent_duration
         metrics["ascent_duration_sec"] = self.last_ascent_duration
 
@@ -216,7 +222,6 @@ class SquatAnalyzer:
             "rep_valid_count": self.count_valid,
             "rep_invalid_count": self.count_invalid,
             "fsm_state": self.state,
-            "feedback_message": self._get_feedback_by_state(),
             "current_frame_errors": frame_errors,
             "metrics": metrics,
             "session_history": self.history,
