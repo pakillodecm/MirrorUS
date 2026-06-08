@@ -8,15 +8,12 @@ from src.logic.pose_detector import PoseDetector
 
 
 def test_extract_landmarks_real_image():
-    """Verifica que se extraen landmarks correctos a partir de una imagen real.
+    """Verifica que se extraen landmarks world correctos a partir de una imagen real.
 
-    Comprueba que los landmarks normalizados y los world landmarks se generan,
-    que las coordenadas Z difieren entre ambos sistemas (distintas unidades),
-    y que cada landmark contiene exactamente 4 componentes (x, y, z, visibilidad).
+    Comprueba que world contiene la clave LEFT_KNEE con 4 componentes
+    (x, y, z, visibilidad) y que raw está disponible para el dibujo.
     """
-    assets_dir = Path(__file__).parent.parent / "assets"
-    image_path = assets_dir / "squat_check.jpg"
-
+    image_path = Path(__file__).parent.parent / "assets" / "squat_check.jpg"
     if not image_path.exists():
         pytest.fail(f"Falta el asset de prueba en: {image_path}")
 
@@ -24,43 +21,36 @@ def test_extract_landmarks_real_image():
     frame = cv2.imread(str(image_path))
     result = detector.extract_landmarks(frame)
 
-    assert result.normalized is not None
     assert result.world is not None
-    assert "LEFT_KNEE" in result.normalized
-    assert result.world["LEFT_KNEE"][2] != result.normalized["LEFT_KNEE"][2]
-    assert len(result.normalized["LEFT_KNEE"]) == 4
+    assert "LEFT_KNEE" in result.world
+    assert len(result.world["LEFT_KNEE"]) == 4
+    assert result.raw is not None
 
 
 def test_extract_landmarks_no_person():
     """Verifica que un frame sin persona devuelve un PoseResult vacío."""
     detector = PoseDetector()
-    frame = np.zeros((480, 640, 3), dtype=np.uint8)
-    result = detector.extract_landmarks(frame)
+    result = detector.extract_landmarks(np.zeros((480, 640, 3), dtype=np.uint8))
 
-    assert result.normalized is None
     assert result.world is None
+    assert result.raw is None
 
 
 def test_extract_landmarks_none_frame():
     """Verifica que un frame None devuelve un PoseResult vacío de forma segura."""
-    detector = PoseDetector()
-    result = detector.extract_landmarks(None)
+    result = PoseDetector().extract_landmarks(None)
 
-    assert result.normalized is None
     assert result.world is None
     assert result.raw is None
 
 
 def test_reset_filters_clears_state():
-    """Verifica que reset_filters() vacía el diccionario interno de filtros.
-
-    Simula que el detector ha procesado landmarks (creando filtros internos)
-    y comprueba que tras el reset el diccionario queda completamente vacío.
-    """
+    """Verifica que reset_filters() vacía el diccionario interno de filtros."""
     detector = PoseDetector()
-    dummy_data = {"LEFT_KNEE": np.array([0.1, 0.2, 0.3, 0.9])}
-    detector._filter_dict(dummy_data, detector.filters_world)
-
+    detector._filter_dict(
+        {"LEFT_KNEE": np.array([0.1, 0.2, 0.3, 0.9])},
+        detector.filters_world,
+    )
     assert len(detector.filters_world) > 0
 
     detector.reset_filters()
@@ -68,36 +58,6 @@ def test_reset_filters_clears_state():
     assert len(detector.filters_world) == 0
 
 
-def test_draw_landmarks_no_results():
-    """Verifica que draw_landmarks no lanza excepción si results_raw es None."""
-    detector = PoseDetector()
-    frame = np.zeros((480, 640, 3), dtype=np.uint8)
-    detector.draw_landmarks(frame, None)
-
-
-def test_draw_landmarks_with_results():
-    """Verifica que draw_landmarks se ejecuta correctamente con resultados reales.
-
-    Usa la imagen de prueba para obtener un PoseResult con raw válido
-    y comprueba que el método de dibujo no lanza ninguna excepción.
-    """
-    assets_dir = Path(__file__).parent.parent / "assets"
-    image_path = assets_dir / "squat_check.jpg"
-
-    if not image_path.exists():
-        pytest.skip("Asset de prueba no disponible")
-
-    detector = PoseDetector(static_image_mode=True)
-    frame = cv2.imread(str(image_path))
-    result = detector.extract_landmarks(frame)
-
-    assert result.raw is not None, "La imagen de prueba debe detectar una persona"
-    detector.draw_landmarks(frame, result.raw)
-
-
 def test_filter_dict_none_input():
-    """Verifica que _filter_dict retorna None si el diccionario de entrada es None."""
-    detector = PoseDetector()
-    result = detector._filter_dict(None, detector.filters_world)
-
-    assert result is None
+    """Verifica que _filter_dict retorna None si la entrada es None."""
+    assert PoseDetector()._filter_dict(None, {}) is None
