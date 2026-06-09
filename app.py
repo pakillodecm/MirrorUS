@@ -27,47 +27,121 @@ from src.ui.components import (
     show_history_modal,
 )
 
-_ERROR_LANDMARK_MAP = {
-    "KNEE_VALGUS": ["LEFT_KNEE", "RIGHT_KNEE"],
-    "TORSO_TILT": ["LEFT_SHOULDER", "RIGHT_SHOULDER"],
+# ---------------------------------------------------------------------------
+# Paleta de colores BGR para el esqueleto
+# ---------------------------------------------------------------------------
+_COLOR_BLUE = (204, 102, 0)  # azul vivo: movimiento sin error (#0066cc)
+_COLOR_BLUE_DIM = (155, 145, 130)  # azul muy desaturado: movimiento con error de frame
+_COLOR_GREEN = (74, 163, 22)  # verde: estado 0 tras rep válida
+_COLOR_ORANGE = (0, 140, 255)  # naranja: estado 0 tras rep inválida
+_COLOR_RED = (0, 0, 220)  # rojo: articulaciones destacadas
+
+# ---------------------------------------------------------------------------
+# Configuración visual por tipo de error
+#
+# ring:       joints con marcador rojo + anillo blanco
+# plain:      joints con marcador rojo sin anillo
+# conn_plain: si True, los joints plain también participan en la generación
+#             de conexiones destacadas (además de los ring). Necesario para
+#             TORSO_TILT, donde se quiere resaltar el trapecio completo
+#             hombro-hombro / hombro-cadera / cadera-cadera.
+# ---------------------------------------------------------------------------
+_ERROR_VISUAL_CONFIG = {
+    "NO_DEPTH": {
+        "ring": ["LEFT_HIP", "RIGHT_HIP"],
+        "plain": ["LEFT_KNEE", "RIGHT_KNEE"],
+        "conn_plain": False,
+    },
+    "MID_ASCENT_COLLAPSE": {
+        "ring": ["LEFT_HIP", "RIGHT_HIP"],
+        "plain": ["LEFT_KNEE", "RIGHT_KNEE"],
+        "conn_plain": False,
+    },
+    "KNEE_VALGUS": {
+        "ring": ["LEFT_KNEE", "RIGHT_KNEE"],
+        "plain": ["LEFT_HIP", "RIGHT_HIP", "LEFT_ANKLE", "RIGHT_ANKLE"],
+        "conn_plain": False,
+    },
+    "TORSO_TILT": {
+        "ring": ["LEFT_SHOULDER", "RIGHT_SHOULDER"],
+        "plain": ["LEFT_HIP", "RIGHT_HIP"],
+        "conn_plain": True,
+    },
 }
 
-_REP_ERROR_NAMES = {"NO_DEPTH", "MID_ASCENT_COLLAPSE"}
-_REP_ERROR_KEY_JOINTS = ["LEFT_KNEE", "RIGHT_KNEE"]
-
 _DEPTH_STATE_CONFIG = {
-    0: ("#9aa1ab", "Reposo"),
+    0: ("#9aa1ab", "○ Reposo"),
     1: ("#d97706", "⬇ Bajando"),
-    2: ("#16a34a", "✓ Zona profunda"),
+    2: ("#16a34a", "◆ Zona profunda"),
     3: ("#0066cc", "⬆ Subiendo"),
 }
 
 
-def _draw_skeleton_frame(frame, landmarks, mp_pose, frame_errors):
-    """Dibuja el esqueleto con codificación de color por error de fotograma.
+def _resolve_error_visuals(error_names, mp_pose):
+    """Resuelve los conjuntos de articulaciones y conexiones a destacar.
 
-    Verde sin errores. Articulaciones con error en rojo con anillo blanco.
-    Conexiones que tocan articulaciones con error en rojo. El resto del
-    esqueleto se atenúa a gris para dirigir la atención al foco del problema.
+    Combina la configuración de múltiples errores por unión. El anillo tiene
+    prioridad sobre plain cuando un joint aparece en ambos.
+
+    Una conexión se destaca si:
+    - Al menos uno de sus extremos pertenece a conn_joints, Y
+    - Ambos extremos pertenecen al universo (ring ∪ plain).
+
+    conn_joints == ring por defecto. Si algún error activa conn_plain=True,
+    conn_joints se amplía a ring ∪ plain para ese error.
+
+    Args:
+        error_names: Iterable de nombres de error activos.
+        mp_pose: mp.solutions.pose para resolver índices de landmark.
+
+    Returns:
+        Tupla (ring_indices, plain_indices, conn_joints) como sets de enteros.
+    """
+    ring = set()
+    plain = set()
+    conn_plain = False
+
+    for name in error_names:
+        cfg = _ERROR_VISUAL_CONFIG.get(name, {})
+        ring.update(mp_pose.PoseLandmark[j].value for j in cfg.get("ring", []))
+        plain.update(mp_pose.PoseLandmark[j].value for j in cfg.get("plain", []))
+        if cfg.get("conn_plain", False):
+            conn_plain = True
+
+    plain -= ring  # el anillo tiene prioridad sobre plain
+    conn_joints = ring | (plain if conn_plain else set())
+
+    return ring, plain, conn_joints
+
+
+def _draw_skeleton(
+    frame,
+    landmarks,
+    mp_pose,
+    base_color,
+    ring_indices,
+    plain_indices,
+    conn_joints,
+):
+    """Dibuja el esqueleto con codificación de color unificada.
+
+    Las conexiones se destacan en rojo cuando al menos un extremo pertenece
+    a conn_joints y ambos extremos están en el universo de joints destacados.
+    Joints con ring: rojo con anillo blanco. Joints plain: rojo sin anillo.
+    El resto del esqueleto se dibuja en base_color.
 
     Args:
         frame: Frame BGR de OpenCV.
         landmarks: pose_landmarks del resultado raw de MediaPipe.
         mp_pose: mp.solutions.pose accesible desde el detector persistente.
-        frame_errors: dict {nombre_error: bool} del payload del analizador.
+        base_color: Tupla BGR para conexiones y joints no destacados.
+        ring_indices: Set de índices MediaPipe con anillo blanco.
+        plain_indices: Set de índices MediaPipe sin anillo.
+        conn_joints: Set de índices que generan conexiones destacadas.
     """
     h, w = frame.shape[:2]
-    error_indices = set()
-    for err_name, is_active in frame_errors.items():
-        if is_active and err_name in _ERROR_LANDMARK_MAP:
-            for lm_name in _ERROR_LANDMARK_MAP[err_name]:
-                error_indices.add(mp_pose.PoseLandmark[lm_name].value)
-
-    has_errors = bool(error_indices)
-    ok_color = (74, 163, 22)
-    err_color = (0, 0, 220)
-    dim_color = (140, 140, 140)
     lm_list = landmarks.landmark
+    universe = ring_indices | plain_indices
 
     for conn in mp_pose.POSE_CONNECTIONS:
         s, e = tuple(conn)
@@ -76,61 +150,25 @@ def _draw_skeleton_frame(frame, landmarks, mp_pose, frame_errors):
             continue
         pt_s = (int(lm_s.x * w), int(lm_s.y * h))
         pt_e = (int(lm_e.x * w), int(lm_e.y * h))
-        if s in error_indices or e in error_indices:
-            cv2.line(frame, pt_s, pt_e, err_color, 3, cv2.LINE_AA)
+        is_highlighted = (
+            (s in conn_joints or e in conn_joints) and s in universe and e in universe
+        )
+        if is_highlighted:
+            cv2.line(frame, pt_s, pt_e, _COLOR_RED, 3, cv2.LINE_AA)
         else:
-            color = dim_color if has_errors else ok_color
-            cv2.line(frame, pt_s, pt_e, color, 2, cv2.LINE_AA)
+            cv2.line(frame, pt_s, pt_e, base_color, 2, cv2.LINE_AA)
 
     for idx, lm in enumerate(lm_list):
         if lm.visibility < 0.3:
             continue
         cx, cy = int(lm.x * w), int(lm.y * h)
-        if idx in error_indices:
-            cv2.circle(frame, (cx, cy), 8, err_color, -1, cv2.LINE_AA)
+        if idx in ring_indices:
+            cv2.circle(frame, (cx, cy), 8, _COLOR_RED, -1, cv2.LINE_AA)
             cv2.circle(frame, (cx, cy), 11, (255, 255, 255), 2, cv2.LINE_AA)
+        elif idx in plain_indices:
+            cv2.circle(frame, (cx, cy), 6, _COLOR_RED, -1, cv2.LINE_AA)
         else:
-            color = dim_color if has_errors else ok_color
-            cv2.circle(frame, (cx, cy), 5, color, -1, cv2.LINE_AA)
-
-
-def _draw_skeleton_rep_error(frame, landmarks, mp_pose):
-    """Dibuja esqueleto naranja con rodillas en rojo: señal de error de repetición.
-
-    Activo en FSM=0 cuando la última rep registró NO_DEPTH o MID_ASCENT_COLLAPSE.
-    El naranja distingue este modo del error de fotograma (rojo puro).
-
-    Args:
-        frame: Frame BGR de OpenCV.
-        landmarks: pose_landmarks del resultado raw de MediaPipe.
-        mp_pose: mp.solutions.pose accesible desde el detector persistente.
-    """
-    h, w = frame.shape[:2]
-    orange_bgr = (0, 140, 255)
-    red_bgr = (0, 0, 220)
-    key_indices = {
-        mp_pose.PoseLandmark[lm_name].value for lm_name in _REP_ERROR_KEY_JOINTS
-    }
-    lm_list = landmarks.landmark
-
-    for conn in mp_pose.POSE_CONNECTIONS:
-        s, e = tuple(conn)
-        lm_s, lm_e = lm_list[s], lm_list[e]
-        if lm_s.visibility < 0.3 or lm_e.visibility < 0.3:
-            continue
-        pt_s = (int(lm_s.x * w), int(lm_s.y * h))
-        pt_e = (int(lm_e.x * w), int(lm_e.y * h))
-        cv2.line(frame, pt_s, pt_e, orange_bgr, 2, cv2.LINE_AA)
-
-    for idx, lm in enumerate(lm_list):
-        if lm.visibility < 0.3:
-            continue
-        cx, cy = int(lm.x * w), int(lm.y * h)
-        if idx in key_indices:
-            cv2.circle(frame, (cx, cy), 8, red_bgr, -1, cv2.LINE_AA)
-            cv2.circle(frame, (cx, cy), 11, (255, 255, 255), 2, cv2.LINE_AA)
-        else:
-            cv2.circle(frame, (cx, cy), 5, orange_bgr, -1, cv2.LINE_AA)
+            cv2.circle(frame, (cx, cy), 5, base_color, -1, cv2.LINE_AA)
 
 
 def _depth_indicator_html(
@@ -369,7 +407,7 @@ render_left_panel(
     descent_sec=0.0,
     ascent_sec=0.0,
 )
-render_bio_metrics(bio_placeholder, 180.0, 0.0, 1.0)
+render_bio_metrics(bio_placeholder, 180.0, 0.0, 1.0, d_thr, u_thr, t_thr)
 depth_indicator_ph.markdown(_depth_indicator_html(0.0, 0), unsafe_allow_html=True)
 
 if file_missing:
@@ -450,6 +488,8 @@ if run and not file_missing:
                 st.session_state.min_angle_this_rep = min(
                     angle, st.session_state.min_angle_this_rep
                 )
+            # Reset del mínimo solo tras rep válida; en NO_DEPTH persiste
+            # para mostrar el show_max_hint en el siguiente estado de reposo.
             if (
                 st.session_state.prev_fsm_state in (1, 2, 3)
                 and current_state == 0
@@ -458,12 +498,7 @@ if run and not file_missing:
             ):
                 st.session_state.min_angle_this_rep = 180.0
             st.session_state.prev_fsm_state = current_state
-            rep_error_active = (
-                current_state == 0
-                and bool(history)
-                and not history[-1]["valid"]
-                and bool(_REP_ERROR_NAMES.intersection(history[-1]["errors"]))
-            )
+
             show_max_hint = (
                 current_state == 0
                 and bool(history)
@@ -484,6 +519,9 @@ if run and not file_missing:
                 angle,
                 metrics.get("torso_tilt_deg", 0.0),
                 metrics.get("valgus_ratio", 1.0),
+                d_thr,
+                u_thr,
+                t_thr,
             )
 
             h_orig, w_orig = frame.shape[:2]
@@ -493,18 +531,40 @@ if run and not file_missing:
                 frame, (display_w, display_h), interpolation=cv2.INTER_AREA
             )
 
-            if results.world:
-                if rep_error_active:
-                    _draw_skeleton_rep_error(
-                        frame_display, results.raw.pose_landmarks, _mp_pose
+            # Determinar modo visual del esqueleto según estado FSM e historial
+            if current_state in (1, 2, 3):
+                active_frame_errors = {k for k, v in frame_errors.items() if v}
+                if active_frame_errors:
+                    skel_base = _COLOR_BLUE_DIM
+                    ring_i, plain_i, conn_j = _resolve_error_visuals(
+                        active_frame_errors, _mp_pose
                     )
                 else:
-                    _draw_skeleton_frame(
-                        frame_display,
-                        results.raw.pose_landmarks,
-                        _mp_pose,
-                        frame_errors,
+                    skel_base = _COLOR_BLUE
+                    ring_i, plain_i, conn_j = set(), set(), set()
+            else:  # current_state == 0
+                if not history:
+                    skel_base = _COLOR_BLUE
+                    ring_i, plain_i, conn_j = set(), set(), set()
+                elif history[-1]["valid"]:
+                    skel_base = _COLOR_GREEN
+                    ring_i, plain_i, conn_j = set(), set(), set()
+                else:
+                    skel_base = _COLOR_ORANGE
+                    ring_i, plain_i, conn_j = _resolve_error_visuals(
+                        history[-1]["errors"], _mp_pose
                     )
+
+            if results.world:
+                _draw_skeleton(
+                    frame_display,
+                    results.raw.pose_landmarks,
+                    _mp_pose,
+                    skel_base,
+                    ring_i,
+                    plain_i,
+                    conn_j,
+                )
 
             frame_placeholder.image(
                 frame_display, channels="BGR", use_container_width=True
