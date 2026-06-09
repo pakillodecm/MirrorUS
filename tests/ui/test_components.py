@@ -41,39 +41,39 @@ class TestClamp01:
 
 class TestKneeSemaphore:
     def test_optimal(self):
-        assert _knee_semaphore(80.0) == "✓ Paralelo óptimo"
+        assert _knee_semaphore(80.0, 90.0, 150.0) == "✓ Paralelo óptimo"
 
     def test_boundary_optimal(self):
-        assert _knee_semaphore(85.0) == "✓ Paralelo óptimo"
+        assert _knee_semaphore(85.0, 90.0, 150.0) == "✓ Paralelo óptimo"
 
     def test_broken(self):
-        assert _knee_semaphore(87.0) == "✓ Paralelo roto"
+        assert _knee_semaphore(87.0, 90.0, 150.0) == "✓ Paralelo roto"
 
     def test_boundary_parallel(self):
-        assert _knee_semaphore(90.0) == "✓ Paralelo roto"
+        assert _knee_semaphore(90.0, 90.0, 150.0) == "✓ Paralelo roto"
 
     def test_descending(self):
-        assert _knee_semaphore(110.0) == "⬇ En descenso"
+        assert _knee_semaphore(110.0, 90.0, 150.0) == "⬍ En movimiento"
 
     def test_initial(self):
-        assert _knee_semaphore(160.0) == "— Posición inicial"
+        assert _knee_semaphore(160.0, 90.0, 150.0) == "— Posición inicial"
 
 
 class TestTorsoSemaphore:
     def test_optimal(self):
-        assert _torso_semaphore(20.0) == "✓ Inclinación óptima"
+        assert _torso_semaphore(20.0, 40.0) == "✓ Inclinación óptima"
 
     def test_boundary_optimal(self):
-        assert _torso_semaphore(30.0) == "✓ Inclinación óptima"
+        assert _torso_semaphore(30.0, 40.0) == "✓ Inclinación óptima"
 
     def test_near_limit(self):
-        assert _torso_semaphore(35.0) == "⚠ Cerca del límite"
+        assert _torso_semaphore(35.0, 40.0) == "⚠ Cerca del límite"
 
     def test_boundary_limit(self):
-        assert _torso_semaphore(40.0) == "⚠ Cerca del límite"
+        assert _torso_semaphore(40.0, 40.0) == "⚠ Cerca del límite"
 
     def test_excessive(self):
-        assert _torso_semaphore(50.0) == "✗ Inclinación excesiva"
+        assert _torso_semaphore(50.0, 40.0) == "✗ Inclinación excesiva"
 
 
 class TestValgusSemaphore:
@@ -324,20 +324,28 @@ class TestRenderLeftPanel:
         cols = [MagicMock(), MagicMock()]
         mock_st.columns.return_value = cols
         render_left_panel(_make_placeholder(), 0, 5, 3, 0.0, 0.0)
-        cols[0].metric.assert_any_call("👍 Reps válidas", 5)
-        cols[1].metric.assert_any_call("❌ Con fallo", 3)
+        cols[0].metric.assert_any_call(
+            "✔ Reps válidas", 5, help="Repeticiones válidas en la sesión."
+        )
+        cols[1].metric.assert_any_call(
+            "✖ Con fallo", 3, help="Repeticiones con fallo en la sesión."
+        )
 
     @patch("src.ui.components.st")
     def test_descent_shown_when_positive(self, mock_st):
         mock_st.columns.return_value = [MagicMock(), MagicMock()]
         render_left_panel(_make_placeholder(), 1, 0, 0, 2.5, 0.0)
-        mock_st.metric.assert_any_call("⬇ Bajada", "2.5 s")
+        mock_st.metric.assert_any_call(
+            "⬇ Bajada", "2.5 s", help="Duración de la fase de bajada."
+        )
 
     @patch("src.ui.components.st")
     def test_dash_shown_when_no_data(self, mock_st):
         mock_st.columns.return_value = [MagicMock(), MagicMock()]
         render_left_panel(_make_placeholder(), 0, 0, 0, 0.0, 0.0)
-        mock_st.metric.assert_any_call("⬇ Bajada", "—")
+        mock_st.metric.assert_any_call(
+            "⬇ Bajada", "—", help="Duración de la fase de bajada."
+        )
 
     @patch("src.ui.components.st")
     def test_markdown_called_for_color_line(self, mock_st):
@@ -350,24 +358,24 @@ class TestRenderBioMetrics:
     @patch("src.ui.components.st")
     def test_three_metrics_rendered(self, mock_st):
         mock_st.columns.return_value = [MagicMock(), MagicMock(), MagicMock()]
-        render_bio_metrics(_make_placeholder(), 90.0, 25.0, 0.95)
+        render_bio_metrics(_make_placeholder(), 90.0, 25.0, 0.95, 90.0, 150.0, 40.0)
         assert mock_st.metric.call_count == 3
 
     @patch("src.ui.components.st")
     def test_three_progress_bars(self, mock_st):
         mock_st.columns.return_value = [MagicMock(), MagicMock(), MagicMock()]
-        render_bio_metrics(_make_placeholder(), 90.0, 25.0, 0.95)
+        render_bio_metrics(_make_placeholder(), 90.0, 25.0, 0.95, 90.0, 150.0, 40.0)
         assert mock_st.progress.call_count == 3
 
     @patch("src.ui.components.st")
     def test_knee_angle_in_output(self, mock_st):
         mock_st.columns.return_value = [MagicMock(), MagicMock(), MagicMock()]
-        render_bio_metrics(_make_placeholder(), 87.0, 25.0, 0.95)
+        render_bio_metrics(_make_placeholder(), 87.0, 25.0, 0.95, 90.0, 150.0, 40.0)
         assert "87.0" in str(mock_st.metric.call_args_list)
 
     @patch("src.ui.components.st")
     def test_progress_values_clamped(self, mock_st):
         mock_st.columns.return_value = [MagicMock(), MagicMock(), MagicMock()]
-        render_bio_metrics(_make_placeholder(), 200.0, 90.0, 0.0)
+        render_bio_metrics(_make_placeholder(), 200.0, 90.0, 0.0, 90.0, 150.0, 40.0)
         for call in mock_st.progress.call_args_list:
             assert 0.0 <= call[0][0] <= 1.0
