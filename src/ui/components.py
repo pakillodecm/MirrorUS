@@ -53,12 +53,18 @@ FSM_LABELS = {
     3: "⬆ Subiendo",
 }
 
-# Vocabulario cromático del estado FSM, compartido con el indicador HTML en app.py.
 FSM_LINE_COLORS = {
     0: FSM_LINE_COLOR_DEFAULT,
     1: "#d97706",
     2: "#16a34a",
     3: "#0066cc",
+}
+
+_ERROR_LABELS = {
+    "NO_DEPTH": "Sin profundidad",
+    "MID_ASCENT_COLLAPSE": "Colapso en ascenso",
+    "KNEE_VALGUS": "Valgo de rodilla",
+    "TORSO_TILT": "Inclinación de torso",
 }
 
 
@@ -103,18 +109,58 @@ def _vbt_caption(value: float, lo: float, hi: float) -> str:
     return "✓ Óptimo" if lo <= value <= hi else "⚠ Fuera de rango"
 
 
+def _format_error(error_name: str, record: dict) -> str:
+    """Formatea un error con su etiqueta humana y los valores alcanzados.
+
+    Args:
+        error_name: Clave interna del error (ej. 'NO_DEPTH').
+        record: RepRecord del que leer los valores métricos.
+
+    Returns:
+        String con etiqueta y valores entre paréntesis, o solo la etiqueta
+        si los datos no están disponibles.
+    """
+    label = _ERROR_LABELS.get(error_name, error_name)
+    if error_name == "NO_DEPTH":
+        angle = record.get("min_knee_angle")
+        thr = record.get("depth_threshold")
+        if angle is not None and thr is not None:
+            return f"{label} ({angle:.0f}° / obj. <{thr:.0f}°)"
+    elif error_name == "KNEE_VALGUS":
+        ratio = record.get("min_valgus_ratio")
+        if ratio is not None:
+            return f"{label} (ratio {ratio:.2f} / mín. {VALGUS_GOOD:.2f})"
+    elif error_name == "TORSO_TILT":
+        tilt = record.get("max_torso_tilt")
+        thr = record.get("torso_threshold")
+        if tilt is not None and thr is not None:
+            return f"{label} ({tilt:.0f}° / lím. {thr:.0f}°)"
+    return label
+
+
 def _build_history_df(history: list) -> pd.DataFrame:
     """Construye el DataFrame del historial analítico de la sesión."""
-    rows = [
-        {
-            "Rep": r["rep"],
-            "Estado": "Válida" if r["valid"] else "Fallo",
-            "Errores": ", ".join(r["errors"]) if r["errors"] else "—",
-            "Bajada (s)": round(r["descent_duration_sec"], 2),
-            "Subida (s)": round(r["ascent_duration_sec"], 2),
-        }
-        for r in history
-    ]
+    rows = []
+    for r in history:
+        depth = r.get("min_knee_angle")
+        depth_str = f"{depth:.0f}°" if depth is not None else "—"
+
+        if r["errors"]:
+            error_lines = [_format_error(e, r) for e in r["errors"]]
+            errors_text = "\n".join(error_lines)
+        else:
+            errors_text = "—"
+
+        rows.append(
+            {
+                "Rep": r["rep"],
+                "Estado": "Válida" if r["valid"] else "Fallo",
+                "Flexión de rodillas (°)": depth_str,
+                "Errores": errors_text,
+                "Bajada (s)": round(r["descent_duration_sec"], 2),
+                "Subida (s)": round(r["ascent_duration_sec"], 2),
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -201,7 +247,7 @@ def render_bio_metrics(
         placeholder: st.empty() de ancho completo bajo las columnas.
         knee_angle: Ángulo de rodilla en grados.
         torso_tilt: Inclinación del torso en grados.
-        valgus_ratio: Cociente de valgo rodillas/caderas.
+        valgus_ratio: Cociente de valgo rodillas/tobillos.
         d_thr: Umbral de profundidad para clasificación de rodilla.
         u_thr: Umbral de erguido para clasificación de rodilla.
         t_thr: Umbral de inclinación para clasificación de torso.
@@ -236,7 +282,7 @@ def render_bio_metrics(
             st.metric(
                 "∥ Índice de valgo",
                 f"{valgus_ratio:.2f}",
-                help="Cociente de valgo rodillas/caderas.",
+                help="Cociente de valgo rodillas/tobillos.",
             )
             st.progress(valgus_pct)
             st.caption(
@@ -264,6 +310,7 @@ def render_sidebar_config(is_local: bool, disabled: bool = False):
 
     Args:
         is_local: True si el entorno tiene acceso a cámara.
+        disabled: True si los controles deben deshabilitarse (durante tracking).
 
     Returns:
         Tuple (source_mode, skip_mode, d_thr, u_thr, t_thr).
