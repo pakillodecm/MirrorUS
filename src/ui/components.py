@@ -212,7 +212,7 @@ def detect_runtime_env() -> bool:
     return True
 
 
-def render_sidebar_config(is_local: bool):
+def render_sidebar_config(is_local: bool, disabled: bool = False):
     """Renderiza el panel lateral de configuración.
 
     El slider de umbral superior se limita a 170° para evitar que valores
@@ -233,16 +233,17 @@ def render_sidebar_config(is_local: bool):
         options = [SOURCE_FILE]
         st.caption("⚠️ Cámara no disponible en Cloud.")
 
-    source_mode = st.radio("Fuente", options, index=0)
+    source_mode = st.radio("Fuente", options, index=0, disabled=disabled)
     skip_mode = st.selectbox(
         "Modo IA",
         [SKIP_FULL, SKIP_BALANCED, SKIP_PERFORMANCE],
         index=0 if is_local else 1,
+        disabled=disabled,
     )
     st.caption("UMBRALES BIOMECÁNICOS")
-    d_thr = st.slider("Profundidad", 70, 110, 90)
-    u_thr = st.slider("Erguido", 130, 170, 150)
-    t_thr = st.slider("Torso (°)", 20, 60, 40)
+    d_thr = st.slider("Profundidad", 70, 110, 90, disabled=disabled)
+    u_thr = st.slider("Erguido", 130, 170, 150, disabled=disabled)
+    t_thr = st.slider("Torso (°)", 20, 60, 40, disabled=disabled)
 
     return source_mode, skip_mode, d_thr, u_thr, t_thr
 

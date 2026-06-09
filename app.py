@@ -277,7 +277,9 @@ if "prev_fsm_state" not in st.session_state:
 is_local = detect_runtime_env()
 
 with st.sidebar:
-    source_mode, skip_mode, d_thr, u_thr, t_thr = render_sidebar_config(is_local)
+    source_mode, skip_mode, d_thr, u_thr, t_thr = render_sidebar_config(
+        is_local, disabled=st.session_state.get("run_btn", False)
+    )
 
 st.session_state.depth_detector.down_threshold = d_thr
 st.session_state.depth_detector.up_threshold = u_thr
@@ -356,7 +358,7 @@ with col_video:
 
 bio_placeholder = st.empty()
 
-if st.button("📊 Ver historial analítico de la serie"):
+if st.button("📊 Ver historial analítico de la serie", disabled=run):
     show_history_modal(st.session_state.analyzer.history)
 
 render_left_panel(
