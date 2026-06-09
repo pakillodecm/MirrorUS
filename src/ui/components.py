@@ -3,35 +3,50 @@ import os
 import pandas as pd
 import streamlit as st
 
-SKIP_FULL = "Alta Precisión (100%)"
-SKIP_BALANCED = "Equilibrado (66%)"
-SKIP_PERFORMANCE = "Máx. Rendimiento (50%)"
+FSM_LINE_COLOR_DEFAULT = "#9aa1ab"
 
 SOURCE_CAMERA = "Cámara en vivo"
 SOURCE_FILE = "Archivo de vídeo"
 
-_KNEE_OPTIMAL = 85.0
-_KNEE_PARALLEL = 90.0
-_KNEE_DISPLAY_MIN = 60.0
-_KNEE_DISPLAY_MAX = 180.0
-_KNEE_RANGE = _KNEE_DISPLAY_MAX - _KNEE_DISPLAY_MIN
+SKIP_FULL = "Alta Precisión (100%)"
+SKIP_BALANCED = "Equilibrado (66%)"
+SKIP_PERFORMANCE = "Máx. Rendimiento (50%)"
 
-_TORSO_OPTIMAL = 30.0
-_TORSO_LIMIT = 40.0
-_TORSO_DISPLAY_MAX = 60.0
+SKIP_OPTIONS = [SKIP_FULL, SKIP_BALANCED, SKIP_PERFORMANCE]
 
-_VALGUS_GOOD = 0.90
-_VALGUS_ALERT = 0.85
-_VALGUS_DISPLAY_MIN = 0.60
-_VALGUS_DISPLAY_MAX = 1.20
-_VALGUS_RANGE = _VALGUS_DISPLAY_MAX - _VALGUS_DISPLAY_MIN
+UI_DOWN_LIMIT_SLIDER_MIN = 80
+UI_DOWN_LIMIT_SLIDER_MAX = 120
+UI_DOWN_LIMIT_SLIDER_DEFAULT = 95
 
-_VBT_DESCENT_MIN = 1.5
-_VBT_DESCENT_MAX = 3.0
-_VBT_ASCENT_MIN = 1.0
-_VBT_ASCENT_MAX = 2.5
+UI_UP_LIMIT_SLIDER_MIN = 130
+UI_UP_LIMIT_SLIDER_MAX = 170
+UI_UP_LIMIT_SLIDER_DEFAULT = 155
 
-_FSM_LABELS = {
+UI_TORSO_SLIDER_MIN = 25
+UI_TORSO_SLIDER_MAX = 55
+UI_TORSO_SLIDER_DEFAULT = 40
+
+KNEE_OPT = 85.0
+TORSO_OPT = 30.0
+VALGUS_GOOD = 0.90
+VALGUS_ALERT = 0.85
+
+KNEE_DISPLAY_MIN = 60.0
+KNEE_DISPLAY_MAX = 180.0
+KNEE_RANGE = KNEE_DISPLAY_MAX - KNEE_DISPLAY_MIN
+
+TORSO_DISPLAY_MAX = 60.0
+
+VALGUS_DISPLAY_MIN = 0.60
+VALGUS_DISPLAY_MAX = 1.20
+VALGUS_RANGE = VALGUS_DISPLAY_MAX - VALGUS_DISPLAY_MIN
+
+VBT_DESCENT_MIN = 1.5
+VBT_DESCENT_MAX = 3.0
+VBT_ASCENT_MIN = 1.0
+VBT_ASCENT_MAX = 2.5
+
+FSM_LABELS = {
     0: "○ Reposo",
     1: "⬇ Bajando",
     2: "◆ Zona profunda",
@@ -39,8 +54,8 @@ _FSM_LABELS = {
 }
 
 # Vocabulario cromático del estado FSM, compartido con el indicador HTML en app.py.
-_FSM_LINE_COLORS = {
-    0: "#9aa1ab",
+FSM_LINE_COLORS = {
+    0: FSM_LINE_COLOR_DEFAULT,
     1: "#d97706",
     2: "#16a34a",
     3: "#0066cc",
@@ -54,7 +69,7 @@ def _clamp01(value: float) -> float:
 
 def _knee_semaphore(angle: float, d_thr: float, u_thr: float) -> str:
     """Clasifica el ángulo de rodilla según los umbrales de profundidad."""
-    if angle <= _KNEE_OPTIMAL:
+    if angle <= KNEE_OPT:
         return "✓ Paralelo óptimo"
     if angle <= d_thr:
         return "✓ Paralelo roto"
@@ -65,7 +80,7 @@ def _knee_semaphore(angle: float, d_thr: float, u_thr: float) -> str:
 
 def _torso_semaphore(tilt: float, t_thr: float) -> str:
     """Clasifica la inclinación del torso según los umbrales de tolerancia."""
-    if tilt <= _TORSO_OPTIMAL:
+    if tilt <= TORSO_OPT:
         return "✓ Inclinación óptima"
     if tilt <= t_thr:
         return "⚠ Cerca del límite"
@@ -74,9 +89,9 @@ def _torso_semaphore(tilt: float, t_thr: float) -> str:
 
 def _valgus_semaphore(ratio: float) -> str:
     """Clasifica el índice de valgo según los umbrales de alineación."""
-    if ratio >= _VALGUS_GOOD:
+    if ratio >= VALGUS_GOOD:
         return "✓ Alineación correcta"
-    if ratio >= _VALGUS_ALERT:
+    if ratio >= VALGUS_ALERT:
         return "⚠ Zona de alerta"
     return "✗ Valgo detectado"
 
@@ -138,10 +153,10 @@ def render_left_panel(
         descent_sec: Duración de la última bajada (0.0 si no hay dato).
         ascent_sec: Duración de la última subida (0.0 si no hay dato).
     """
-    line_color = _FSM_LINE_COLORS.get(fsm_state, "#9aa1ab")
+    line_color = FSM_LINE_COLORS.get(fsm_state, FSM_LINE_COLOR_DEFAULT)
 
     with placeholder.container():
-        st.metric("Estado del sistema", _FSM_LABELS.get(fsm_state, "—"))
+        st.metric("Estado del sistema", FSM_LABELS.get(fsm_state, "—"))
         st.markdown(
             f'<div style="height:3px;background:{line_color};'
             'border-radius:2px;margin-bottom:6px;"></div>',
@@ -161,11 +176,11 @@ def render_left_panel(
         with v1:
             d_val = f"{descent_sec:.1f} s" if descent_sec > 0 else "—"
             st.metric("⬇ Bajada", d_val, help="Duración de la fase de bajada.")
-            st.caption(_vbt_caption(descent_sec, _VBT_DESCENT_MIN, _VBT_DESCENT_MAX))
+            st.caption(_vbt_caption(descent_sec, VBT_DESCENT_MIN, VBT_DESCENT_MAX))
         with v2:
             a_val = f"{ascent_sec:.1f} s" if ascent_sec > 0 else "—"
             st.metric("⬆ Subida", a_val, help="Duración de la fase de subida.")
-            st.caption(_vbt_caption(ascent_sec, _VBT_ASCENT_MIN, _VBT_ASCENT_MAX))
+            st.caption(_vbt_caption(ascent_sec, VBT_ASCENT_MIN, VBT_ASCENT_MAX))
 
 
 def render_bio_metrics(
@@ -191,9 +206,9 @@ def render_bio_metrics(
         u_thr: Umbral de erguido para clasificación de rodilla.
         t_thr: Umbral de inclinación para clasificación de torso.
     """
-    knee_pct = _clamp01((_KNEE_DISPLAY_MAX - knee_angle) / _KNEE_RANGE)
-    torso_pct = _clamp01(1.0 - torso_tilt / _TORSO_DISPLAY_MAX)
-    valgus_pct = _clamp01((valgus_ratio - _VALGUS_DISPLAY_MIN) / _VALGUS_RANGE)
+    knee_pct = _clamp01((KNEE_DISPLAY_MAX - knee_angle) / KNEE_RANGE)
+    torso_pct = _clamp01(1.0 - torso_tilt / TORSO_DISPLAY_MAX)
+    valgus_pct = _clamp01((valgus_ratio - VALGUS_DISPLAY_MIN) / VALGUS_RANGE)
 
     with placeholder.container():
         m1, m2, m3 = st.columns(3)
@@ -204,7 +219,9 @@ def render_bio_metrics(
                 help="Ángulo entre el muslo y la pantorrilla.",
             )
             st.progress(knee_pct)
-            st.caption(f"{_knee_semaphore(knee_angle, d_thr, u_thr)} · óptimo <85°")
+            st.caption(
+                f"{_knee_semaphore(knee_angle, d_thr, u_thr)} · óptimo <{KNEE_OPT:.0f}°"
+            )
         with m2:
             st.metric(
                 "↗ Inclinación torso",
@@ -212,7 +229,9 @@ def render_bio_metrics(
                 help="Inclinación del torso respecto a la vertical.",
             )
             st.progress(torso_pct)
-            st.caption(f"{_torso_semaphore(torso_tilt, t_thr)} · óptimo <30°")
+            st.caption(
+                f"{_torso_semaphore(torso_tilt, t_thr)} · óptimo <{TORSO_OPT:.0f}°"
+            )
         with m3:
             st.metric(
                 "∥ Índice de valgo",
@@ -220,7 +239,9 @@ def render_bio_metrics(
                 help="Cociente de valgo rodillas/caderas.",
             )
             st.progress(valgus_pct)
-            st.caption(f"{_valgus_semaphore(valgus_ratio)} · correcto >0.90")
+            st.caption(
+                f"{_valgus_semaphore(valgus_ratio)} · correcto >{VALGUS_GOOD:.2f}"
+            )
 
 
 def detect_runtime_env() -> bool:
@@ -258,14 +279,32 @@ def render_sidebar_config(is_local: bool, disabled: bool = False):
     source_mode = st.radio("Fuente", options, index=0, disabled=disabled)
     skip_mode = st.selectbox(
         "Modo IA",
-        [SKIP_FULL, SKIP_BALANCED, SKIP_PERFORMANCE],
+        SKIP_OPTIONS,
         index=0 if is_local else 1,
         disabled=disabled,
     )
     st.caption("UMBRALES BIOMECÁNICOS")
-    d_thr = st.slider("Profundidad", 70, 110, 90, disabled=disabled)
-    u_thr = st.slider("Erguido", 130, 170, 150, disabled=disabled)
-    t_thr = st.slider("Torso (°)", 20, 60, 40, disabled=disabled)
+    d_thr = st.slider(
+        "Profundidad (°)",
+        UI_DOWN_LIMIT_SLIDER_MIN,
+        UI_DOWN_LIMIT_SLIDER_MAX,
+        UI_DOWN_LIMIT_SLIDER_DEFAULT,
+        disabled=disabled,
+    )
+    u_thr = st.slider(
+        "Erguido (°)",
+        UI_UP_LIMIT_SLIDER_MIN,
+        UI_UP_LIMIT_SLIDER_MAX,
+        UI_UP_LIMIT_SLIDER_DEFAULT,
+        disabled=disabled,
+    )
+    t_thr = st.slider(
+        "Torso (°)",
+        UI_TORSO_SLIDER_MIN,
+        UI_TORSO_SLIDER_MAX,
+        UI_TORSO_SLIDER_DEFAULT,
+        disabled=disabled,
+    )
 
     return source_mode, skip_mode, d_thr, u_thr, t_thr
 
@@ -287,7 +326,7 @@ def render_header_and_instructions(is_local: bool, source_mode: str) -> None:
     if not is_local and source_mode == SOURCE_CAMERA:
         st.error(
             "La cámara no está disponible en Streamlit Cloud. "
-            "Selecciona 'Archivo de vídeo' para evaluar el sistema."
+            f"Selecciona '{SOURCE_FILE}' para evaluar el sistema."
         )
         st.stop()
 
