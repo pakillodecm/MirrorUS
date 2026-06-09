@@ -28,8 +28,8 @@ UI_TORSO_SLIDER_DEFAULT = 40
 
 KNEE_OPT = 85.0
 TORSO_OPT = 30.0
-VALGUS_GOOD = 0.90
-VALGUS_ALERT = 0.85
+VALGUS_GOOD = 0.05
+VALGUS_ALERT = 0.08
 
 KNEE_DISPLAY_MIN = 60.0
 KNEE_DISPLAY_MAX = 180.0
@@ -37,8 +37,8 @@ KNEE_RANGE = KNEE_DISPLAY_MAX - KNEE_DISPLAY_MIN
 
 TORSO_DISPLAY_MAX = 60.0
 
-VALGUS_DISPLAY_MIN = 0.60
-VALGUS_DISPLAY_MAX = 1.20
+VALGUS_DISPLAY_MIN = -0.05
+VALGUS_DISPLAY_MAX = 0.20
 VALGUS_RANGE = VALGUS_DISPLAY_MAX - VALGUS_DISPLAY_MIN
 
 VBT_DESCENT_MIN = 1.5
@@ -75,8 +75,8 @@ def _clamp01(value: float) -> float:
 
 def _knee_semaphore(angle: float, d_thr: float, u_thr: float) -> str:
     """Clasifica el ángulo de rodilla según los umbrales de profundidad."""
-    if angle <= KNEE_OPT:
-        return "✓ Paralelo óptimo"
+    if d_thr > KNEE_OPT and angle <= KNEE_OPT:
+        return "✓ Profundidad óptima"
     if angle <= d_thr:
         return "✓ Paralelo roto"
     if angle <= u_thr:
@@ -86,18 +86,18 @@ def _knee_semaphore(angle: float, d_thr: float, u_thr: float) -> str:
 
 def _torso_semaphore(tilt: float, t_thr: float) -> str:
     """Clasifica la inclinación del torso según los umbrales de tolerancia."""
-    if tilt <= TORSO_OPT:
+    if tilt <= TORSO_OPT and tilt <= t_thr:
         return "✓ Inclinación óptima"
     if tilt <= t_thr:
         return "⚠ Cerca del límite"
     return "✗ Inclinación excesiva"
 
 
-def _valgus_semaphore(ratio: float) -> str:
-    """Clasifica el índice de valgo según los umbrales de alineación."""
-    if ratio >= VALGUS_GOOD:
+def _valgus_semaphore(dev: float) -> str:
+    """Clasifica la desviación de valgo según los umbrales de referencia."""
+    if dev < VALGUS_GOOD:
         return "✓ Alineación correcta"
-    if ratio >= VALGUS_ALERT:
+    if dev < VALGUS_ALERT:
         return "⚠ Zona de alerta"
     return "✗ Valgo detectado"
 
@@ -105,21 +105,12 @@ def _valgus_semaphore(ratio: float) -> str:
 def _vbt_caption(value: float, lo: float, hi: float) -> str:
     """Texto de referencia VBT: estado si hay dato, rango si no lo hay."""
     if value <= 0:
-        return f"Ref: {lo} - {hi} s"
-    return "✓ Óptimo" if lo <= value <= hi else "⚠ Fuera de rango"
+        return f"Ref: {lo:.1f} - {hi:.1f} s"
+    return "✓ Dentro de rango" if lo <= value <= hi else "⚠ Fuera de rango"
 
 
 def _format_error(error_name: str, record: dict) -> str:
-    """Formatea un error con su etiqueta humana y los valores alcanzados.
-
-    Args:
-        error_name: Clave interna del error (ej. 'NO_DEPTH').
-        record: RepRecord del que leer los valores métricos.
-
-    Returns:
-        String con etiqueta y valores entre paréntesis, o solo la etiqueta
-        si los datos no están disponibles.
-    """
+    """Formatea un error con su etiqueta humana y los valores alcanzados."""
     label = _ERROR_LABELS.get(error_name, error_name)
     if error_name == "NO_DEPTH":
         angle = record.get("min_knee_angle")
@@ -127,9 +118,9 @@ def _format_error(error_name: str, record: dict) -> str:
         if angle is not None and thr is not None:
             return f"{label} ({angle:.0f}° / obj. <{thr:.0f}°)"
     elif error_name == "KNEE_VALGUS":
-        ratio = record.get("min_valgus_ratio")
-        if ratio is not None:
-            return f"{label} (ratio {ratio:.2f} / mín. {VALGUS_GOOD:.2f})"
+        dev = record.get("max_valgus_dev")
+        if dev is not None:
+            return f"{label} (desv. {dev:.3f} / lím. <{VALGUS_GOOD:.3f})"
     elif error_name == "TORSO_TILT":
         tilt = record.get("max_torso_tilt")
         thr = record.get("torso_threshold")
@@ -154,7 +145,7 @@ def _build_history_df(history: list) -> pd.DataFrame:
         rows.append(
             {
                 "Rep": r["rep"],
-                "Estado": "Válida" if r["valid"] else "Fallo",
+                "Estado": "Válida ✔" if r["valid"] else "Fallida ✖",
                 "Flexión de rodillas (°)": depth_str,
                 "Errores": errors_text,
                 "Bajada (s)": round(r["descent_duration_sec"], 2),
@@ -254,7 +245,7 @@ def render_bio_metrics(
     """
     knee_pct = _clamp01((KNEE_DISPLAY_MAX - knee_angle) / KNEE_RANGE)
     torso_pct = _clamp01(1.0 - torso_tilt / TORSO_DISPLAY_MAX)
-    valgus_pct = _clamp01((valgus_ratio - VALGUS_DISPLAY_MIN) / VALGUS_RANGE)
+    valgus_pct = _clamp01(1.0 - (valgus_ratio - VALGUS_DISPLAY_MIN) / VALGUS_RANGE)
 
     with placeholder.container():
         m1, m2, m3 = st.columns(3)
@@ -281,12 +272,12 @@ def render_bio_metrics(
         with m3:
             st.metric(
                 "∥ Índice de valgo",
-                f"{valgus_ratio:.2f}",
-                help="Cociente de valgo rodillas/tobillos.",
+                f"{valgus_ratio:.3f}",
+                help="Desviación medial de rodilla respecto al eje cadera-tobillo.",
             )
             st.progress(valgus_pct)
             st.caption(
-                f"{_valgus_semaphore(valgus_ratio)} · correcto >{VALGUS_GOOD:.2f}"
+                f"{_valgus_semaphore(valgus_ratio)} · correcto <{VALGUS_GOOD:.2f}"
             )
 
 

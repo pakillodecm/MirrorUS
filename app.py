@@ -201,7 +201,7 @@ def _depth_indicator_html(
     if show_max_hint and min_pct > 0:
         right_label = (
             f'<span style="color:#d97706;font-weight:500;">'
-            f"máx.&nbsp;{min_angle_deg:.0f}°&nbsp;·&nbsp;sin profundidad</span>"
+            f"&nbsp;Sin profundidad suficiente&nbsp({min_angle_deg:.0f}°)</span>"
         )
     else:
         right_label = (
@@ -291,7 +291,7 @@ if "detector" not in st.session_state:
 if "depth_detector" not in st.session_state:
     st.session_state.depth_detector = DepthDetector()
 if "valgus_detector" not in st.session_state:
-    st.session_state.valgus_detector = KneeValgusDetector(threshold=0.90)
+    st.session_state.valgus_detector = KneeValgusDetector(threshold=0.08)
 if "torso_detector" not in st.session_state:
     st.session_state.torso_detector = TorsoTiltDetector(max_tilt_deg=40.0)
 

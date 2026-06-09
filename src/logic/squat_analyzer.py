@@ -16,7 +16,7 @@ class RepRecord(TypedDict):
     ascent_duration_sec: float
     min_knee_angle: float
     depth_threshold: float
-    min_valgus_ratio: Optional[float]
+    max_valgus_dev: Optional[float]
     max_torso_tilt: Optional[float]
     torso_threshold: Optional[float]
 
@@ -70,7 +70,7 @@ class SquatAnalyzer:
 
         # Métricas de rep en curso para el historial
         self._min_knee_angle_this_rep: float = 180.0
-        self._min_valgus_ratio_this_rep: float = 1.0
+        self._max_valgus_dev_this_rep: float = 0.0
         self._max_torso_tilt_this_rep: float = 0.0
 
     def reset_counters(self) -> None:
@@ -85,7 +85,7 @@ class SquatAnalyzer:
         self.last_descent_duration = 0.0
         self.last_ascent_duration = 0.0
         self._min_knee_angle_this_rep = 180.0
-        self._min_valgus_ratio_this_rep = 1.0
+        self._max_valgus_dev_this_rep = 0.0
         self._max_torso_tilt_this_rep = 0.0
 
     def process_frame(
@@ -124,7 +124,7 @@ class SquatAnalyzer:
             else:
                 frame_errors[name] = False
                 if name == "KNEE_VALGUS":
-                    metrics["valgus_ratio"] = 1.0
+                    metrics["valgus_ratio"] = 0.0
                 elif name == "TORSO_TILT":
                     metrics["torso_tilt_deg"] = 0.0
 
@@ -172,15 +172,15 @@ class SquatAnalyzer:
         if old_state == 0 and self.state != 0:
             self.current_rep_errors = set()
             self._min_knee_angle_this_rep = 180.0
-            self._min_valgus_ratio_this_rep = 1.0
+            self._max_valgus_dev_this_rep = 0.0
             self._max_torso_tilt_this_rep = 0.0
 
         if self.state in (1, 2, 3):
             self._min_knee_angle_this_rep = min(angle, self._min_knee_angle_this_rep)
             valgus = metrics.get("valgus_ratio")
             if valgus is not None:
-                self._min_valgus_ratio_this_rep = min(
-                    valgus, self._min_valgus_ratio_this_rep
+                self._max_valgus_dev_this_rep = max(
+                    valgus, self._max_valgus_dev_this_rep
                 )
             torso = metrics.get("torso_tilt_deg")
             if torso is not None:
@@ -232,8 +232,8 @@ class SquatAnalyzer:
                 "ascent_duration_sec": self.last_ascent_duration,
                 "min_knee_angle": round(self._min_knee_angle_this_rep, 1),
                 "depth_threshold": self.depth_detector.down_threshold,
-                "min_valgus_ratio": (
-                    round(self._min_valgus_ratio_this_rep, 2) if has_valgus else None
+                "max_valgus_dev": (
+                    round(self._max_valgus_dev_this_rep, 3) if has_valgus else None
                 ),
                 "max_torso_tilt": (
                     round(self._max_torso_tilt_this_rep, 1) if has_torso else None
