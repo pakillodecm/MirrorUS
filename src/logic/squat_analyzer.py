@@ -14,6 +14,11 @@ class RepRecord(TypedDict):
     errors: List[str]
     descent_duration_sec: float
     ascent_duration_sec: float
+    min_knee_angle: float
+    depth_threshold: float
+    min_valgus_ratio: Optional[float]
+    max_torso_tilt: Optional[float]
+    torso_threshold: Optional[float]
 
 
 class FramePayload(TypedDict):
@@ -63,6 +68,11 @@ class SquatAnalyzer:
         self.last_descent_duration = 0.0
         self.last_ascent_duration = 0.0
 
+        # Métricas de rep en curso para el historial
+        self._min_knee_angle_this_rep: float = 180.0
+        self._min_valgus_ratio_this_rep: float = 1.0
+        self._max_torso_tilt_this_rep: float = 0.0
+
     def reset_counters(self) -> None:
         """Reinicia el estado interno, cronómetros e historial de la sesión."""
         self.state = 0
@@ -74,6 +84,9 @@ class SquatAnalyzer:
         self.time_reached_deep = None
         self.last_descent_duration = 0.0
         self.last_ascent_duration = 0.0
+        self._min_knee_angle_this_rep = 180.0
+        self._min_valgus_ratio_this_rep = 1.0
+        self._max_torso_tilt_this_rep = 0.0
 
     def process_frame(
         self,
@@ -155,11 +168,25 @@ class SquatAnalyzer:
         ):
             self.state = 0
 
-        # 4. Ciclo de vida de errores por repetición
+        # 4. Ciclo de vida de errores y métricas por repetición
         if old_state == 0 and self.state != 0:
             self.current_rep_errors = set()
+            self._min_knee_angle_this_rep = 180.0
+            self._min_valgus_ratio_this_rep = 1.0
+            self._max_torso_tilt_this_rep = 0.0
 
         if self.state in (1, 2, 3):
+            self._min_knee_angle_this_rep = min(angle, self._min_knee_angle_this_rep)
+            valgus = metrics.get("valgus_ratio")
+            if valgus is not None:
+                self._min_valgus_ratio_this_rep = min(
+                    valgus, self._min_valgus_ratio_this_rep
+                )
+            torso = metrics.get("torso_tilt_deg")
+            if torso is not None:
+                self._max_torso_tilt_this_rep = max(
+                    torso, self._max_torso_tilt_this_rep
+                )
             for name, is_active in frame_errors.items():
                 if is_active:
                     self.current_rep_errors.add(name)
@@ -170,6 +197,12 @@ class SquatAnalyzer:
         )
         if rep_just_closed:
             rep_idx = len(self.history) + 1
+
+            # Capturar errores posturales antes de añadir errores estructurales
+            has_valgus = "KNEE_VALGUS" in self.current_rep_errors
+            has_torso = "TORSO_TILT" in self.current_rep_errors
+            torso_detector = self.detectors.get("TORSO_TILT")
+
             if old_state == 1:
                 self.current_rep_errors.add("NO_DEPTH")
                 self.last_descent_duration = (
@@ -190,28 +223,34 @@ class SquatAnalyzer:
                     else 0.0
                 )
 
-            if self.current_rep_errors:
-                self.count_invalid += 1
-                self.history.append(
-                    {
-                        "rep": rep_idx,
-                        "valid": False,
-                        "errors": sorted(list(self.current_rep_errors)),
-                        "descent_duration_sec": self.last_descent_duration,
-                        "ascent_duration_sec": self.last_ascent_duration,
-                    }
-                )
-            else:
+            is_valid = not bool(self.current_rep_errors)
+            record: RepRecord = {
+                "rep": rep_idx,
+                "valid": is_valid,
+                "errors": sorted(list(self.current_rep_errors)),
+                "descent_duration_sec": self.last_descent_duration,
+                "ascent_duration_sec": self.last_ascent_duration,
+                "min_knee_angle": round(self._min_knee_angle_this_rep, 1),
+                "depth_threshold": self.depth_detector.down_threshold,
+                "min_valgus_ratio": (
+                    round(self._min_valgus_ratio_this_rep, 2) if has_valgus else None
+                ),
+                "max_torso_tilt": (
+                    round(self._max_torso_tilt_this_rep, 1) if has_torso else None
+                ),
+                "torso_threshold": (
+                    torso_detector.max_tilt_deg
+                    if (has_torso and torso_detector)
+                    else None
+                ),
+            }
+
+            if is_valid:
                 self.count_valid += 1
-                self.history.append(
-                    {
-                        "rep": rep_idx,
-                        "valid": True,
-                        "errors": [],
-                        "descent_duration_sec": self.last_descent_duration,
-                        "ascent_duration_sec": self.last_ascent_duration,
-                    }
-                )
+            else:
+                self.count_invalid += 1
+
+            self.history.append(record)
             self.current_rep_errors = set()
 
         # 6. Duraciones instantáneas para el indicador de profundidad en tiempo real
