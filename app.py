@@ -176,6 +176,7 @@ def _depth_indicator_html(
     fsm_state: int,
     min_progress: float = 0.0,
     show_max_hint: bool = False,
+    min_angle_deg: float = 180.0,
 ) -> str:
     """Genera la barra de profundidad HTML coloreada por fase FSM con marca de mínimo.
 
@@ -187,6 +188,7 @@ def _depth_indicator_html(
         fsm_state: Estado actual de la FSM (0-3).
         min_progress: Profundidad máxima alcanzada esta rep, en [0.0, 1.0].
         show_max_hint: Si True muestra el máximo en el label (activo tras NO_DEPTH).
+        min_angle_deg: Ángulo mínimo de rodilla alcanzado esta rep, en grados.
 
     Returns:
         HTML listo para st.markdown con unsafe_allow_html=True.
@@ -198,7 +200,7 @@ def _depth_indicator_html(
     if show_max_hint and min_pct > 0:
         right_label = (
             f'<span style="color:#d97706;font-weight:500;">'
-            f"máx.&nbsp;{min_pct}%&nbsp;·&nbsp;sin profundidad</span>"
+            f"máx.&nbsp;{min_angle_deg:.0f}°&nbsp;·&nbsp;sin profundidad</span>"
         )
     else:
         right_label = (
@@ -581,7 +583,11 @@ if run and not file_missing:
             )
             depth_indicator_ph.markdown(
                 _depth_indicator_html(
-                    progress, current_state, min_progress, show_max_hint
+                    progress,
+                    current_state,
+                    min_progress,
+                    show_max_hint,
+                    min_angle_deg=st.session_state.min_angle_this_rep,
                 ),
                 unsafe_allow_html=True,
             )
