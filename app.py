@@ -187,6 +187,7 @@ def _depth_indicator_html(
         progress: Progreso actual de profundidad en [0.0, 1.0].
         fsm_state: Estado actual de la FSM (0-3).
         min_progress: Profundidad máxima alcanzada esta rep, en [0.0, 1.0].
+            Se usa para posicionar la marca vertical del tick.
         show_max_hint: Si True muestra el máximo en el label (activo tras NO_DEPTH).
         min_angle_deg: Ángulo mínimo de rodilla alcanzado esta rep, en grados.
 
@@ -310,16 +311,32 @@ if "min_angle_this_rep" not in st.session_state:
     st.session_state.min_angle_this_rep = 180.0
 if "prev_fsm_state" not in st.session_state:
     st.session_state.prev_fsm_state = 0
+# Resetea el checkbox de tracking si una mutación lo solicitó en el rerun anterior
+if st.session_state.pop("_reset_run_btn", False):
+    st.session_state.pop("run_btn", None)
 
 # ---------------------------------------------------------------------------
-# 3. SIDEBAR Y SINCRONIZACIÓN
+# 3. SIDEBAR: CONFIGURACIÓN, FUENTE DE VÍDEO E INICIO DE TRACKING
 # ---------------------------------------------------------------------------
 is_local = detect_runtime_env()
+video_file = None  # sobreescrito en el sidebar si source_mode == SOURCE_FILE
 
 with st.sidebar:
     source_mode, skip_mode, d_thr, u_thr, t_thr = render_sidebar_config(
         is_local, disabled=st.session_state.get("run_btn", False)
     )
+
+    if source_mode == SOURCE_FILE:
+        video_file = st.file_uploader(
+            "Sube un vídeo de tu sentadilla",
+            type=["mp4", "mov", "avi"],
+            label_visibility="collapsed",
+            disabled=st.session_state.get("run_btn", False),
+        )
+
+    file_missing = source_mode == SOURCE_FILE and not video_file
+
+    run = st.checkbox("▶  Iniciar Seguimiento", key="run_btn", disabled=file_missing)
 
 st.session_state.depth_detector.down_threshold = d_thr
 st.session_state.depth_detector.up_threshold = u_thr
@@ -331,18 +348,12 @@ st.session_state.torso_detector.max_tilt_deg = t_thr
 render_header_and_instructions(is_local, source_mode)
 
 # ---------------------------------------------------------------------------
-# 5. GESTIÓN DE ENTRADA MULTIMEDIA
+# 5. PROCESAMIENTO DE LA FUENTE MULTIMEDIA
 # ---------------------------------------------------------------------------
-video_file = None
 input_path = None
 do_flip = True
 
 if source_mode == SOURCE_FILE:
-    video_file = st.file_uploader(
-        "Sube un vídeo de tu sentadilla",
-        type=["mp4", "mov", "avi"],
-        label_visibility="collapsed",
-    )
     if video_file:
         f_ext = os.path.splitext(video_file.name)[1]
         f_sign = hashlib.md5(video_file.name.encode()).hexdigest()[:6]
@@ -354,8 +365,6 @@ if source_mode == SOURCE_FILE:
 else:
     input_path = 0
     do_flip = True
-
-file_missing = source_mode == SOURCE_FILE and not video_file
 
 # ---------------------------------------------------------------------------
 # 6. SENSOR DE MUTACIÓN
@@ -369,7 +378,7 @@ if (
     source_mode != st.session_state.prev_source
     or input_path != st.session_state.prev_path
 ):
-    st.session_state.run_btn = False
+    st.session_state["_reset_run_btn"] = True
     if "cap" in st.session_state:
         st.session_state.cap.release()
         del st.session_state.cap
@@ -387,8 +396,6 @@ if (
 # ---------------------------------------------------------------------------
 # 7. LAYOUT PRINCIPAL
 # ---------------------------------------------------------------------------
-run = st.checkbox("▶  Iniciar Seguimiento", key="run_btn", disabled=file_missing)
-
 col_panel, col_video = st.columns([0.38, 0.62])
 with col_panel:
     left_placeholder = st.empty()
@@ -414,7 +421,7 @@ depth_indicator_ph.markdown(_depth_indicator_html(0.0, 0), unsafe_allow_html=Tru
 
 if file_missing:
     with frame_placeholder.container():
-        st.warning("Sube un vídeo usando el selector de arriba para continuar.")
+        st.warning("Sube un vídeo en el panel lateral para continuar.")
 elif not run:
     frame_placeholder.markdown(_video_placeholder_html(), unsafe_allow_html=True)
 
@@ -491,7 +498,7 @@ if run and not file_missing:
                     angle, st.session_state.min_angle_this_rep
                 )
             # Reset del mínimo solo tras rep válida; en NO_DEPTH persiste
-            # para mostrar el show_max_hint en el siguiente estado de reposo.
+            # para mostrar el ángulo alcanzado en el indicador de profundidad.
             if (
                 st.session_state.prev_fsm_state in (1, 2, 3)
                 and current_state == 0
