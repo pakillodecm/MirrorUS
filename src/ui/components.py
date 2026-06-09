@@ -32,9 +32,9 @@ _VBT_ASCENT_MIN = 1.0
 _VBT_ASCENT_MAX = 2.5
 
 _FSM_LABELS = {
-    0: "⚪ Reposo",
+    0: "○ Reposo",
     1: "⬇ Bajando",
-    2: "✓ Zona profunda",
+    2: "◆ Zona profunda",
     3: "⬆ Subiendo",
 }
 
@@ -52,22 +52,22 @@ def _clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
-def _knee_semaphore(angle: float) -> str:
+def _knee_semaphore(angle: float, d_thr: float, u_thr: float) -> str:
     """Clasifica el ángulo de rodilla según los umbrales de profundidad."""
     if angle <= _KNEE_OPTIMAL:
         return "✓ Paralelo óptimo"
-    if angle <= _KNEE_PARALLEL:
+    if angle <= d_thr:
         return "✓ Paralelo roto"
-    if angle <= 130:
-        return "⬇ En descenso"
+    if angle <= u_thr:
+        return "⬍ En movimiento"
     return "— Posición inicial"
 
 
-def _torso_semaphore(tilt: float) -> str:
+def _torso_semaphore(tilt: float, t_thr: float) -> str:
     """Clasifica la inclinación del torso según los umbrales de tolerancia."""
     if tilt <= _TORSO_OPTIMAL:
         return "✓ Inclinación óptima"
-    if tilt <= _TORSO_LIMIT:
+    if tilt <= t_thr:
         return "⚠ Cerca del límite"
     return "✗ Inclinación excesiva"
 
@@ -84,7 +84,7 @@ def _valgus_semaphore(ratio: float) -> str:
 def _vbt_caption(value: float, lo: float, hi: float) -> str:
     """Texto de referencia VBT: estado si hay dato, rango si no lo hay."""
     if value <= 0:
-        return f"Ref: {lo}–{hi} s"
+        return f"Ref: {lo} - {hi} s"
     return "✓ Óptimo" if lo <= value <= hi else "⚠ Fuera de rango"
 
 
@@ -149,18 +149,22 @@ def render_left_panel(
         )
 
         c1, c2 = st.columns(2)
-        c1.metric("👍 Reps válidas", rep_valid)
-        c2.metric("❌ Con fallo", rep_invalid)
+        c1.metric(
+            "✔ Reps válidas", rep_valid, help="Repeticiones válidas en la sesión."
+        )
+        c2.metric(
+            "✖ Con fallo", rep_invalid, help="Repeticiones con fallo en la sesión."
+        )
 
         st.caption("TELEMETRÍA VBT · ÚLTIMA REPETICIÓN")
         v1, v2 = st.columns(2)
         with v1:
             d_val = f"{descent_sec:.1f} s" if descent_sec > 0 else "—"
-            st.metric("⬇ Bajada", d_val)
+            st.metric("⬇ Bajada", d_val, help="Duración de la fase de bajada.")
             st.caption(_vbt_caption(descent_sec, _VBT_DESCENT_MIN, _VBT_DESCENT_MAX))
         with v2:
             a_val = f"{ascent_sec:.1f} s" if ascent_sec > 0 else "—"
-            st.metric("⬆ Subida", a_val)
+            st.metric("⬆ Subida", a_val, help="Duración de la fase de subida.")
             st.caption(_vbt_caption(ascent_sec, _VBT_ASCENT_MIN, _VBT_ASCENT_MAX))
 
 
@@ -169,6 +173,9 @@ def render_bio_metrics(
     knee_angle: float,
     torso_tilt: float,
     valgus_ratio: float,
+    d_thr: float,
+    u_thr: float,
+    t_thr: float,
 ) -> None:
     """Renderiza las tres métricas biomecánicas en tiempo real.
 
@@ -180,6 +187,9 @@ def render_bio_metrics(
         knee_angle: Ángulo de rodilla en grados.
         torso_tilt: Inclinación del torso en grados.
         valgus_ratio: Cociente de valgo rodillas/caderas.
+        d_thr: Umbral de profundidad para clasificación de rodilla.
+        u_thr: Umbral de erguido para clasificación de rodilla.
+        t_thr: Umbral de inclinación para clasificación de torso.
     """
     knee_pct = _clamp01((_KNEE_DISPLAY_MAX - knee_angle) / _KNEE_RANGE)
     torso_pct = _clamp01(1.0 - torso_tilt / _TORSO_DISPLAY_MAX)
@@ -188,15 +198,27 @@ def render_bio_metrics(
     with placeholder.container():
         m1, m2, m3 = st.columns(3)
         with m1:
-            st.metric("📐 Ángulo de rodilla", f"{knee_angle:.1f}°")
+            st.metric(
+                "∡ Ángulo de rodilla",
+                f"{knee_angle:.1f}°",
+                help="Ángulo entre el muslo y la pantorrilla.",
+            )
             st.progress(knee_pct)
-            st.caption(f"{_knee_semaphore(knee_angle)} · óptimo <85°")
+            st.caption(f"{_knee_semaphore(knee_angle, d_thr, u_thr)} · óptimo <85°")
         with m2:
-            st.metric("📏 Inclinación torso", f"{torso_tilt:.1f}°")
+            st.metric(
+                "↗ Inclinación torso",
+                f"{torso_tilt:.1f}°",
+                help="Inclinación del torso respecto a la vertical.",
+            )
             st.progress(torso_pct)
-            st.caption(f"{_torso_semaphore(torso_tilt)} · óptimo <30°")
+            st.caption(f"{_torso_semaphore(torso_tilt, t_thr)} · óptimo <30°")
         with m3:
-            st.metric("🦵 Índice de valgo", f"{valgus_ratio:.2f}")
+            st.metric(
+                "∥ Índice de valgo",
+                f"{valgus_ratio:.2f}",
+                help="Cociente de valgo rodillas/caderas.",
+            )
             st.progress(valgus_pct)
             st.caption(f"{_valgus_semaphore(valgus_ratio)} · correcto >0.90")
 
@@ -225,13 +247,13 @@ def render_sidebar_config(is_local: bool, disabled: bool = False):
     Returns:
         Tuple (source_mode, skip_mode, d_thr, u_thr, t_thr).
     """
-    st.markdown("**⚙️ Configuración**")
+    st.markdown("**⚙ Configuración**")
 
     if is_local:
         options = [SOURCE_CAMERA, SOURCE_FILE]
     else:
         options = [SOURCE_FILE]
-        st.caption("⚠️ Cámara no disponible en Cloud.")
+        st.caption("⚠ Cámara no disponible en Cloud.")
 
     source_mode = st.radio("Fuente", options, index=0, disabled=disabled)
     skip_mode = st.selectbox(
@@ -256,7 +278,7 @@ def render_header_and_instructions(is_local: bool, source_mode: str) -> None:
         source_mode: Modo de fuente de entrada seleccionado en el sidebar.
     """
     st.markdown(
-        "#### 🏋️‍♂️ MirrorUS"
+        "#### ✦ MirrorUS"
         '<span style="font-size:14px;color:#9aa1ab;'
         'font-weight:400;margin-left:10px;">'
         "Análisis Biomecánico · TFG</span>",

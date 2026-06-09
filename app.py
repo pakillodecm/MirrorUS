@@ -347,7 +347,7 @@ if (
 # ---------------------------------------------------------------------------
 # 7. LAYOUT PRINCIPAL
 # ---------------------------------------------------------------------------
-run = st.checkbox("🔥 Iniciar Seguimiento", key="run_btn", disabled=file_missing)
+run = st.checkbox("▶  Iniciar Seguimiento", key="run_btn", disabled=file_missing)
 
 col_panel, col_video = st.columns([0.38, 0.62])
 with col_panel:
@@ -358,7 +358,7 @@ with col_video:
 
 bio_placeholder = st.empty()
 
-if st.button("📊 Ver historial analítico de la serie", disabled=run):
+if st.button("☰ Ver historial analítico de la serie", disabled=run):
     show_history_modal(st.session_state.analyzer.history)
 
 render_left_panel(
