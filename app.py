@@ -59,7 +59,7 @@ _ERROR_VISUAL_CONFIG = {
     },
     "KNEE_VALGUS": {
         "ring": ["LEFT_KNEE", "RIGHT_KNEE"],
-        "plain": ["LEFT_HIP", "RIGHT_HIP", "LEFT_ANKLE", "RIGHT_ANKLE"],
+        "plain": ["LEFT_ANKLE", "RIGHT_ANKLE"],
         "conn_plain": False,
     },
     "TORSO_TILT": {

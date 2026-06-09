@@ -10,16 +10,16 @@ class KneeValgusDetector:
         """Inicializa el detector.
 
         Args:
-            threshold: Ratio mínimo rodillas/caderas antes de marcar valgo.
+            threshold: Ratio mínimo rodillas/tobillos antes de marcar valgo.
                 0.90 implica que las rodillas no deben estar más del 10% más
-                juntas que las caderas.
+                juntas que los tobillos.
         """
         self.threshold = float(threshold)
 
     def analyze(
         self, world_landmarks: Optional[Dict[str, np.ndarray]]
     ) -> Tuple[bool, float]:
-        """Analiza el ratio de alineación rodillas/caderas en el plano XZ.
+        """Analiza el ratio de alineación rodillas/tobillos en el plano XZ.
 
         Args:
             world_landmarks: Coordenadas world de MediaPipe, o None.
@@ -31,24 +31,29 @@ class KneeValgusDetector:
         if world_landmarks is None:
             return False, 1.0
         try:
-            l_hip = world_landmarks["LEFT_HIP"]
-            r_hip = world_landmarks["RIGHT_HIP"]
+            l_ankle = world_landmarks["LEFT_ANKLE"]
+            r_ankle = world_landmarks["RIGHT_ANKLE"]
             l_knee = world_landmarks["LEFT_KNEE"]
             r_knee = world_landmarks["RIGHT_KNEE"]
 
-            if l_hip[3] < 0.5 or r_hip[3] < 0.5 or l_knee[3] < 0.5 or r_knee[3] < 0.5:
+            if (
+                l_ankle[3] < 0.5
+                or r_ankle[3] < 0.5
+                or l_knee[3] < 0.5
+                or r_knee[3] < 0.5
+            ):
                 return False, 1.0
 
-            hip_distance = np.sqrt(
-                (l_hip[0] - r_hip[0]) ** 2 + (l_hip[2] - r_hip[2]) ** 2
+            ankle_distance = np.sqrt(
+                (l_ankle[0] - r_ankle[0]) ** 2 + (l_ankle[2] - r_ankle[2]) ** 2
             )
-            if hip_distance == 0:
+            if ankle_distance < 0.1:
                 return False, 1.0
 
             knee_distance = np.sqrt(
                 (l_knee[0] - r_knee[0]) ** 2 + (l_knee[2] - r_knee[2]) ** 2
             )
-            valgus_ratio = knee_distance / hip_distance
+            valgus_ratio = knee_distance / ankle_distance
             is_valgus = bool(valgus_ratio < self.threshold)
             return is_valgus, valgus_ratio
 
