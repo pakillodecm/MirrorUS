@@ -138,7 +138,7 @@ def _build_history_df(history: list) -> pd.DataFrame:
 
         if r["errors"]:
             error_lines = [_format_error(e, r) for e in r["errors"]]
-            errors_text = "\n".join(error_lines)
+            errors_text = "  |  ".join(error_lines)
         else:
             errors_text = "—"
 
@@ -165,7 +165,19 @@ def show_history_modal(history: list) -> None:  # pragma: no cover
     if not history:
         st.caption("Sin repeticiones registradas aún.")
         return
-    st.dataframe(_build_history_df(history), hide_index=True, use_container_width=True)
+    st.dataframe(
+        _build_history_df(history),
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Rep": st.column_config.NumberColumn(width="small"),
+            "Estado": st.column_config.TextColumn(width="small"),
+            "Flexión de rodillas (°)": st.column_config.TextColumn(width="small"),
+            "Errores": st.column_config.TextColumn(width="large"),
+            "Bajada (s)": st.column_config.NumberColumn(width="small"),
+            "Subida (s)": st.column_config.NumberColumn(width="small"),
+        },
+    )
 
 
 def render_left_panel(
