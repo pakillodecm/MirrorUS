@@ -3,6 +3,8 @@
 **Trabajo Fin de Grado · Ingeniería del Software · ETSII Universidad de Sevilla**
 Autor: Francisco de Castro Mañas · Tutora: Diana Borrego
 
+🔗 **Aplicación desplegada:** [mirrorus.streamlit.app](https://mirrorus.streamlit.app/)
+
 ---
 
 ## Descripción
@@ -142,4 +144,4 @@ Frame BGR → PoseDetector → world landmarks (filtrados)
 - Requiere que el atleta sea completamente visible en el encuadre (de pies a cabeza).
 - El análisis de valgo asume que el plano frontal del atleta es aproximadamente paralelo al plano de la cámara.
 - El rendimiento depende del hardware: en equipos sin GPU se recomienda el modo "Equilibrado" o "Máx. rendimiento".
-- No disponible en Streamlit Cloud por limitaciones de acceso a cámara en entornos cloud.
+- Desplegado en [Streamlit Community Cloud](https://mirrorus.streamlit.app/) con funcionalidad analítica completa. La visualización del vídeo en vivo presenta limitaciones en el entorno cloud: la cámara no es accesible (el servidor carece de dispositivo de captura) y la previsualización del vídeo subido no se renderiza, si bien el análisis, las métricas y el historial operan con normalidad. El uso con cámara en vivo requiere ejecución local.

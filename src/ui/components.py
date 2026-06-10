@@ -120,7 +120,7 @@ def _format_error(error_name: str, record: dict) -> str:
     elif error_name == "KNEE_VALGUS":
         dev = record.get("max_valgus_dev")
         if dev is not None:
-            return f"{label} (desv. {dev:.3f} / lím. <{VALGUS_GOOD:.3f})"
+            return f"{label} (desv. {dev:.3f} / lím. <{VALGUS_ALERT:.3f})"
     elif error_name == "TORSO_TILT":
         tilt = record.get("max_torso_tilt")
         thr = record.get("torso_threshold")
@@ -168,7 +168,7 @@ def show_history_modal(history: list) -> None:  # pragma: no cover
     st.dataframe(
         _build_history_df(history),
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "Rep": st.column_config.NumberColumn(width="small"),
             "Estado": st.column_config.TextColumn(width="small"),
@@ -289,7 +289,7 @@ def render_bio_metrics(
             )
             st.progress(valgus_pct)
             st.caption(
-                f"{_valgus_semaphore(valgus_ratio)} · correcto <{VALGUS_GOOD:.2f}"
+                f"{_valgus_semaphore(valgus_ratio)} · límite <{VALGUS_ALERT:.2f}"
             )
 
 
