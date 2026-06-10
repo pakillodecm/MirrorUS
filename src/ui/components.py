@@ -250,7 +250,7 @@ def render_bio_metrics(
         placeholder: st.empty() de ancho completo bajo las columnas.
         knee_angle: Ángulo de rodilla en grados.
         torso_tilt: Inclinación del torso en grados.
-        valgus_ratio: Cociente de valgo rodillas/tobillos.
+        valgus_ratio: Desviación medial de rodilla respecto al eje cadera-tobillo.
         d_thr: Umbral de profundidad para clasificación de rodilla.
         u_thr: Umbral de erguido para clasificación de rodilla.
         t_thr: Umbral de inclinación para clasificación de torso.
