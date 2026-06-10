@@ -1,67 +1,147 @@
-# 🏋️‍♂️ MirrorUS
+# ✦ MirrorUS — Análisis Biomecánico de Sentadilla
 
-> Sistema inteligente de análisis biomecánico de sentadillas en tiempo real.
-> Trabajo Fin de Grado — Universidad de Sevilla
+**Trabajo Fin de Grado · Ingeniería del Software · ETSII Universidad de Sevilla**
+Autor: Francisco de Castro Mañas · Tutora: Diana Borrego
 
-MirrorUS utiliza visión por computador y estimación de pose (MediaPipe) para
-analizar la técnica de sentadilla en tiempo real, detectando fallos posturales
-como el valgo de rodilla o la inclinación excesiva del torso.
+---
 
-## Características
+## Descripción
 
-- Detección de profundidad de sentadilla (rotura del paralelo)
-- Detección de valgo de rodilla en coordenadas métricas reales
-- Detección de inclinación del torso
-- Telemetría de velocidad por fases (VBT): duración de bajada y subida
-- Soporte para cámara en vivo y análisis de vídeo pregrabado
-- Historial analítico de la sesión exportable
+MirrorUS es un sistema de análisis biomecánico en tiempo real para la sentadilla (squat). A partir de la señal de vídeo de una cámara convencional, detecta la pose del atleta fotograma a fotograma mediante MediaPipe, aplica una máquina de estados finitos (FSM) para segmentar cada repetición y evalúa tres indicadores posturales:
 
-## Arquitectura
+- **Profundidad de rodilla** — ángulo ponderado por visibilidad entre muslo y pantorrilla.
+- **Inclinación de torso** — desviación del vector torso respecto a la vertical.
+- **Colapso medial de rodilla (valgo)** — desviación perpendicular de la rodilla respecto al eje cadera-tobillo, invariante ante sentadillas sumo o con stance ancho.
 
-```
-src/
-├── logic/          # Lógica pura, sin dependencias de UI
-│   ├── angles.py           # Cálculo de ángulos biomecánicos
-│   ├── depth_detector.py   # Sensor de profundidad de sentadilla
-│   ├── valgus_detector.py  # Detector de valgo de rodilla
-│   ├── torso_detector.py   # Detector de inclinación del torso
-│   ├── squat_analyzer.py   # Orquestador FSM + telemetría VBT
-│   ├── pose_detector.py    # Wrapper de MediaPipe + filtrado
-│   └── filters.py          # Filtro One Euro para suavizado
-└── ui/
-    └── components.py       # Componentes Streamlit desacoplados
-```
+Los resultados se presentan en una interfaz Streamlit con retroalimentación visual en tiempo real: esqueleto coloreado por estado de error, barra de profundidad, métricas biomecánicas e historial analítico de la serie.
+
+---
+
+## Características principales
+
+- Detección de pose con **MediaPipe Pose** (model complexity 1, coordenadas world métricas)
+- Filtrado de ruido con **filtro One Euro** por articulación
+- FSM de 4 estados: Reposo → Bajando → Zona profunda → Subiendo
+- Timeout automático de repetición para movimientos abortados
+- Detección de errores por fotograma: valgo de rodilla, inclinación de torso
+- Detección de errores por repetición: sin profundidad, colapso en ascenso
+- Telemetría VBT (Velocity Based Training): duración de bajada y subida
+- Historial analítico con ángulo de flexión, errores y valores de referencia
+- Soporte para cámara en vivo y vídeo subido
+- Interfaz completamente en español
+- Cobertura de tests del 100 %
+
+---
+
+## Requisitos del sistema
+
+- **Python 3.12**
+- **Poetry** (gestor de dependencias) Instrucciones de instalación en https://python-poetry.org/docs/#installation
+- Dependencias del sistema (necesarias para OpenCV y MediaPipe):
+  - Linux: `libgl1`, `ffmpeg`
+  - Windows/macOS: instaladas automáticamente con los paquetes
+
+---
 
 ## Instalación
 
-Requiere Python 3.12 y [Poetry](https://python-poetry.org/).
-
 ```bash
-git clone https://github.com/tu-usuario/mirrorus.git
-cd mirrorus
+# 1. Clonar el repositorio
+git clone https://github.com/pakillodecm/TFG-Pose-Tracking.git
+# 1.1. Entrar en el directorio creado
+
+# 2. Instalar dependencias con Poetry
 poetry install
+
+# 3. Activar el entorno virtual
+poetry shell
 ```
 
-## Uso
+---
+
+## Ejecución
 
 ```bash
-poetry run streamlit run app.py
+streamlit run app.py
 ```
+
+La aplicación se abre automáticamente en `http://localhost:8501`.
+
+### Configuración del sidebar
+
+| Parámetro | Rango | Defecto | Descripción |
+|-----------|-------|---------|-------------|
+| Fuente | Cámara / Archivo | Cámara | Origen del vídeo |
+| Modo IA | Alta precisión / Equilibrado / Máx. rendimiento | Alta precisión | Fracción de fotogramas procesados |
+| Profundidad (°) | 80–120° | 95° | Ángulo de rodilla para considerar paralelo roto |
+| Erguido (°) | 130–170° | 155° | Ángulo de rodilla para considerar posición erguida |
+| Torso (°) | 25–55° | 40° | Ángulo máximo de inclinación de torso |
+
+---
 
 ## Tests
 
 ```bash
+# Ejecutar todos los tests con cobertura
 poetry run pytest
+
+# Solo tests sin cobertura (más rápido)
+poetry run pytest --no-cov
 ```
 
-## Tecnologías
+La suite completa cubre el 100 % de las líneas de `src/`. Los tests de lógica son puramente unitarios y no requieren cámara ni GPU.
 
-- [MediaPipe](https://mediapipe.dev/) — Estimación de pose
-- [OpenCV](https://opencv.org/) — Captura y procesado de vídeo
-- [Streamlit](https://streamlit.io/) — Interfaz web
-- [NumPy](https://numpy.org/) — Cálculo vectorial
-- [Poetry](https://python-poetry.org/) — Gestión de dependencias
+---
 
-## Autor
+## Arquitectura
 
-Francisco de Castro Mañas — frademann@alum.us.es
+```
+tfg/
+├── app.py                  # Orquestador principal (Streamlit)
+├── src/
+│   ├── logic/              # Núcleo de análisis (sin dependencias de UI)
+│   │   ├── angles.py       # Cálculo de ángulos 3D
+│   │   ├── depth_detector.py   # Detector de profundidad de rodilla
+│   │   ├── filters.py      # Filtro One Euro
+│   │   ├── pose_detector.py    # Wrapper MediaPipe + filtrado
+│   │   ├── squat_analyzer.py   # FSM, telemetría y registro de repeticiones
+│   │   ├── torso_detector.py   # Detector de inclinación de torso
+│   │   └── valgus_detector.py  # Detector de colapso medial de rodilla
+│   └── ui/
+│       └── components.py   # Componentes y constantes de la interfaz
+└── tests/                  # Tests unitarios (espejo de src/)
+```
+
+**Principio de separación:** `src/logic/` no importa nada de Streamlit ni OpenCV. El dibujo del esqueleto y toda la lógica de UI residen en `app.py` y `src/ui/`. Esto permite testear el núcleo analítico de forma aislada y rápida.
+
+**Flujo de datos por fotograma:**
+
+```
+Frame BGR → PoseDetector → world landmarks (filtrados)
+         → SquatAnalyzer.process_frame() → FramePayload
+         → render_left_panel / render_bio_metrics / _draw_skeleton
+```
+
+---
+
+## Stack tecnológico
+
+| Componente | Tecnología |
+|-----------|-----------|
+| Interfaz | Streamlit ≥ 1.35 |
+| Detección de pose | MediaPipe 0.10.14 |
+| Visión artificial | OpenCV (headless) |
+| Cómputo numérico | NumPy < 2.0 |
+| Filtrado de señal | One Euro Filter (implementación propia) |
+| Tests | pytest + pytest-cov |
+| Linting | black, flake8, isort |
+| CI | GitHub Actions |
+
+---
+
+## Limitaciones conocidas
+
+- Requiere que el atleta sea completamente visible en el encuadre (de pies a cabeza).
+- El análisis de valgo asume que el plano frontal del atleta es aproximadamente paralelo al plano de la cámara.
+- El rendimiento depende del hardware: en equipos sin GPU se recomienda el modo "Equilibrado" o "Máx. rendimiento".
+- No disponible en Streamlit Cloud por limitaciones de acceso a cámara en entornos cloud.
