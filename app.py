@@ -575,9 +575,7 @@ if run and not file_missing:
                     conn_j,
                 )
 
-            frame_placeholder.image(
-                frame_display, channels="BGR", use_container_width=True
-            )
+            frame_placeholder.image(frame_display, channels="BGR", width="stretch")
 
             range_angle = max(u_thr - d_thr, 1)
             progress = float(np.clip((u_thr - angle) / range_angle, 0.0, 1.0))

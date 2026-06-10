@@ -168,7 +168,7 @@ def show_history_modal(history: list) -> None:  # pragma: no cover
     st.dataframe(
         _build_history_df(history),
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "Rep": st.column_config.NumberColumn(width="small"),
             "Estado": st.column_config.TextColumn(width="small"),
