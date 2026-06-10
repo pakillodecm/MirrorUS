@@ -416,7 +416,7 @@ render_left_panel(
     descent_sec=0.0,
     ascent_sec=0.0,
 )
-render_bio_metrics(bio_placeholder, 180.0, 0.0, 1.0, d_thr, u_thr, t_thr)
+render_bio_metrics(bio_placeholder, 180.0, 0.0, 0.0, d_thr, u_thr, t_thr)
 depth_indicator_ph.markdown(_depth_indicator_html(0.0, 0), unsafe_allow_html=True)
 
 if file_missing:
@@ -527,7 +527,7 @@ if run and not file_missing:
                 bio_placeholder,
                 angle,
                 metrics.get("torso_tilt_deg", 0.0),
-                metrics.get("valgus_ratio", 1.0),
+                metrics.get("valgus_ratio", 0.0),
                 d_thr,
                 u_thr,
                 t_thr,
