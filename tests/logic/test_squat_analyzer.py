@@ -10,7 +10,11 @@ from src.logic.valgus_detector import KneeValgusDetector
 
 
 def create_frame_data(
-    angle_deg: float, hip_w: float, knee_w: float, vis: float = 0.95
+    angle_deg: float,
+    hip_w: float,
+    knee_w: float,
+    ankle_w: float,
+    vis: float = 0.95,
 ) -> dict:
     """Genera un esqueleto 3D con ángulo de rodilla controlado.
 
@@ -18,12 +22,14 @@ def create_frame_data(
         angle_deg: Ángulo de rodilla deseado en grados.
         hip_w: Anchura entre caderas en metros.
         knee_w: Anchura entre rodillas en metros.
+        ankle_w: Anchura entre tobillos en metros.
         vis: Visibilidad aplicada a todos los landmarks.
 
     Returns:
         Diccionario de landmarks compatible con SquatAnalyzer.process_frame().
     """
-    ankle = np.array([-knee_w / 2.0, 0.0, 0.0, vis])
+
+    ankle = np.array([-ankle_w / 2.0, 0.0, 0.0, vis])
     knee = np.array([-knee_w / 2.0, 0.5, 0.0, vis])
     dx = (-hip_w / 2.0) - (-knee_w / 2.0)
     dy = -0.5 * np.cos(np.deg2rad(angle_deg))
@@ -37,7 +43,7 @@ def create_frame_data(
         "LEFT_KNEE": knee,
         "RIGHT_KNEE": np.array([knee_w / 2.0, 0.5, 0.0, vis]),
         "LEFT_ANKLE": ankle,
-        "RIGHT_ANKLE": np.array([knee_w / 2.0, 0.0, 0.0, vis]),
+        "RIGHT_ANKLE": np.array([ankle_w / 2.0, 0.0, 0.0, vis]),
     }
 
 
@@ -62,37 +68,37 @@ def test_analyzer_perfect_lifecycle():
     depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
     analyzer = SquatAnalyzer(
         depth_detector=depth,
-        detectors={"KNEE_VALGUS": KneeValgusDetector(threshold=0.90)},
+        detectors={"KNEE_VALGUS": KneeValgusDetector(threshold=0.08)},
         hysteresis=5.0,
     )
 
     assert (
-        analyzer.process_frame(create_frame_data(170.0, 0.40, 0.40), timestamp=0.0)[
-            "fsm_state"
-        ]
+        analyzer.process_frame(
+            create_frame_data(170.0, 0.40, 0.40, 0.40), timestamp=0.0
+        )["fsm_state"]
         == 0
     )
     assert (
-        analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40), timestamp=1.0)[
-            "fsm_state"
-        ]
+        analyzer.process_frame(
+            create_frame_data(130.0, 0.40, 0.40, 0.40), timestamp=1.0
+        )["fsm_state"]
         == 1
     )
     assert (
-        analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40), timestamp=2.5)[
-            "fsm_state"
-        ]
+        analyzer.process_frame(
+            create_frame_data(85.0, 0.40, 0.40, 0.40), timestamp=2.5
+        )["fsm_state"]
         == 2
     )
     assert (
-        analyzer.process_frame(create_frame_data(120.0, 0.40, 0.40), timestamp=3.5)[
-            "fsm_state"
-        ]
+        analyzer.process_frame(
+            create_frame_data(120.0, 0.40, 0.40, 0.40), timestamp=3.5
+        )["fsm_state"]
         == 3
     )
 
     payload = analyzer.process_frame(
-        create_frame_data(160.0, 0.40, 0.40), timestamp=4.5
+        create_frame_data(160.0, 0.40, 0.40, 0.40), timestamp=4.5
     )
     assert payload["fsm_state"] == 0
     assert payload["rep_valid_count"] == 1
@@ -108,17 +114,17 @@ def test_analyzer_failed_lifecycle_with_valgus():
     depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
     analyzer = SquatAnalyzer(
         depth_detector=depth,
-        detectors={"KNEE_VALGUS": KneeValgusDetector(threshold=0.90)},
+        detectors={"KNEE_VALGUS": KneeValgusDetector(threshold=0.08)},
         hysteresis=5.0,
     )
-    analyzer.process_frame(create_frame_data(170.0, 0.40, 0.40))
-    analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40))
-    analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40))
+    analyzer.process_frame(create_frame_data(170.0, 0.40, 0.40, 0.40))
+    analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40, 0.40))
+    analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40, 0.40))
 
-    payload = analyzer.process_frame(create_frame_data(120.0, 0.40, 0.30))
+    payload = analyzer.process_frame(create_frame_data(120.0, 0.40, 0.20, 0.50))
     assert payload["current_frame_errors"]["KNEE_VALGUS"] is True
 
-    payload = analyzer.process_frame(create_frame_data(160.0, 0.40, 0.40))
+    payload = analyzer.process_frame(create_frame_data(160.0, 0.40, 0.40, 0.40))
     assert payload["rep_invalid_count"] == 1
     assert "KNEE_VALGUS" in payload["session_history"][-1]["errors"]
 
@@ -128,14 +134,14 @@ def test_analyzer_aborted_squat_no_depth():
     depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
     analyzer = SquatAnalyzer(
         depth_detector=depth,
-        detectors={"KNEE_VALGUS": KneeValgusDetector(threshold=0.90)},
+        detectors={"KNEE_VALGUS": KneeValgusDetector(threshold=0.08)},
         hysteresis=5.0,
     )
-    analyzer.process_frame(create_frame_data(170.0, 0.40, 0.40))
-    analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40))
-    analyzer.process_frame(create_frame_data(105.0, 0.40, 0.40))
+    analyzer.process_frame(create_frame_data(170.0, 0.40, 0.40, 0.40))
+    analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40, 0.40))
+    analyzer.process_frame(create_frame_data(105.0, 0.40, 0.40, 0.40))
 
-    payload = analyzer.process_frame(create_frame_data(160.0, 0.40, 0.40))
+    payload = analyzer.process_frame(create_frame_data(160.0, 0.40, 0.40, 0.40))
     assert payload["fsm_state"] == 0
     assert payload["rep_invalid_count"] == 1
     assert "NO_DEPTH" in payload["session_history"][-1]["errors"]
@@ -146,19 +152,23 @@ def test_analyzer_ascent_collapse():
     depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
     analyzer = SquatAnalyzer(
         depth_detector=depth,
-        detectors={"KNEE_VALGUS": KneeValgusDetector(threshold=0.90)},
+        detectors={"KNEE_VALGUS": KneeValgusDetector(threshold=0.08)},
         hysteresis=5.0,
     )
-    analyzer.process_frame(create_frame_data(170.0, 0.40, 0.40))
-    analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40))
-    analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40))
+    analyzer.process_frame(create_frame_data(170.0, 0.40, 0.40, 0.40))
+    analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40, 0.40))
+    analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40, 0.40))
     assert (
-        analyzer.process_frame(create_frame_data(120.0, 0.40, 0.40))["fsm_state"] == 3
+        analyzer.process_frame(create_frame_data(120.0, 0.40, 0.40, 0.40))["fsm_state"]
+        == 3
     )
-    assert analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40))["fsm_state"] == 2
-    analyzer.process_frame(create_frame_data(120.0, 0.40, 0.40))
+    assert (
+        analyzer.process_frame(create_frame_data(85.0, 0.40, 0.40, 0.40))["fsm_state"]
+        == 2
+    )
+    analyzer.process_frame(create_frame_data(120.0, 0.40, 0.40, 0.40))
 
-    payload = analyzer.process_frame(create_frame_data(160.0, 0.40, 0.40))
+    payload = analyzer.process_frame(create_frame_data(160.0, 0.40, 0.40, 0.40))
     assert payload["rep_invalid_count"] == 1
     assert "MID_ASCENT_COLLAPSE" in payload["session_history"][-1]["errors"]
 
@@ -168,11 +178,11 @@ def test_analyzer_reset_counters():
     depth = DepthDetector(down_threshold=90.0, up_threshold=150.0)
     analyzer = SquatAnalyzer(
         depth_detector=depth,
-        detectors={"KNEE_VALGUS": KneeValgusDetector(threshold=0.90)},
+        detectors={"KNEE_VALGUS": KneeValgusDetector(threshold=0.08)},
         hysteresis=5.0,
     )
     for t, angle in [(0.0, 170), (1.0, 130), (2.0, 85), (3.0, 120), (4.0, 160)]:
-        analyzer.process_frame(create_frame_data(angle, 0.40, 0.40), timestamp=t)
+        analyzer.process_frame(create_frame_data(angle, 0.40, 0.40, 0.40), timestamp=t)
     assert analyzer.count_valid == 1
 
     analyzer.reset_counters()
@@ -196,7 +206,7 @@ def test_analyzer_torso_tilt_metric():
         detectors={"TORSO_TILT": TorsoTiltDetector(max_tilt_deg=40.0)},
         hysteresis=5.0,
     )
-    payload = analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40))
+    payload = analyzer.process_frame(create_frame_data(130.0, 0.40, 0.40, 0.40))
 
     assert "torso_tilt_deg" in payload["metrics"]
 
@@ -207,14 +217,14 @@ def test_analyzer_none_landmarks_defaults():
     analyzer = SquatAnalyzer(
         depth_detector=depth,
         detectors={
-            "KNEE_VALGUS": KneeValgusDetector(threshold=0.90),
+            "KNEE_VALGUS": KneeValgusDetector(threshold=0.08),
             "TORSO_TILT": TorsoTiltDetector(max_tilt_deg=40.0),
         },
         hysteresis=5.0,
     )
     payload = analyzer.process_frame(None)
 
-    assert payload["metrics"]["valgus_ratio"] == 1.0
+    assert payload["metrics"]["valgus_ratio"] == 0.0
     assert payload["metrics"]["torso_tilt_deg"] == 0.0
 
 

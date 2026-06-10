@@ -41,10 +41,10 @@ class TestClamp01:
 
 class TestKneeSemaphore:
     def test_optimal(self):
-        assert _knee_semaphore(80.0, 90.0, 150.0) == "✓ Paralelo óptimo"
+        assert _knee_semaphore(80.0, 90.0, 150.0) == "✓ Profundidad óptima"
 
     def test_boundary_optimal(self):
-        assert _knee_semaphore(85.0, 90.0, 150.0) == "✓ Paralelo óptimo"
+        assert _knee_semaphore(85.0, 90.0, 150.0) == "✓ Profundidad óptima"
 
     def test_broken(self):
         assert _knee_semaphore(87.0, 90.0, 150.0) == "✓ Paralelo roto"
@@ -78,19 +78,19 @@ class TestTorsoSemaphore:
 
 class TestValgusSemaphore:
     def test_correct(self):
-        assert _valgus_semaphore(1.0) == "✓ Alineación correcta"
+        assert _valgus_semaphore(0.0) == "✓ Alineación correcta"
 
     def test_boundary_good(self):
-        assert _valgus_semaphore(0.90) == "✓ Alineación correcta"
+        assert _valgus_semaphore(0.04) == "✓ Alineación correcta"
 
     def test_alert(self):
-        assert _valgus_semaphore(0.87) == "⚠ Zona de alerta"
+        assert _valgus_semaphore(0.06) == "⚠ Zona de alerta"
 
     def test_boundary_alert(self):
-        assert _valgus_semaphore(0.85) == "⚠ Zona de alerta"
+        assert _valgus_semaphore(0.07) == "⚠ Zona de alerta"
 
     def test_valgus(self):
-        assert _valgus_semaphore(0.80) == "✗ Valgo detectado"
+        assert _valgus_semaphore(0.08) == "✗ Valgo detectado"
 
 
 class TestVbtCaption:
@@ -99,13 +99,13 @@ class TestVbtCaption:
         assert "1.5" in r and "3.0" in r
 
     def test_optimal(self):
-        assert _vbt_caption(2.0, 1.5, 3.0) == "✓ Óptimo"
+        assert _vbt_caption(2.0, 1.5, 3.0) == "✓ Dentro de rango"
 
     def test_boundary_low(self):
-        assert _vbt_caption(1.5, 1.5, 3.0) == "✓ Óptimo"
+        assert _vbt_caption(1.5, 1.5, 3.0) == "✓ Dentro de rango"
 
     def test_boundary_high(self):
-        assert _vbt_caption(3.0, 1.5, 3.0) == "✓ Óptimo"
+        assert _vbt_caption(3.0, 1.5, 3.0) == "✓ Dentro de rango"
 
     def test_too_slow(self):
         assert _vbt_caption(4.0, 1.5, 3.0) == "⚠ Fuera de rango"
@@ -125,6 +125,7 @@ class TestBuildHistoryDf:
                 {
                     "rep": 1,
                     "valid": True,
+                    "min_knee_angle": 85.0,
                     "errors": [],
                     "descent_duration_sec": 2.0,
                     "ascent_duration_sec": 1.5,
@@ -134,6 +135,7 @@ class TestBuildHistoryDf:
         assert list(df.columns) == [
             "Rep",
             "Estado",
+            "Flexión de rodillas (°)",
             "Errores",
             "Bajada (s)",
             "Subida (s)",
@@ -145,13 +147,14 @@ class TestBuildHistoryDf:
                 {
                     "rep": 1,
                     "valid": True,
+                    "min_knee_angle": 85.0,
                     "errors": [],
                     "descent_duration_sec": 2.1,
                     "ascent_duration_sec": 1.8,
                 }
             ]
         )
-        assert df.iloc[0]["Estado"] == "Válida"
+        assert df.iloc[0]["Estado"] == "Válida ✔"
         assert df.iloc[0]["Errores"] == "—"
 
     def test_invalid_rep_with_errors(self):
@@ -160,14 +163,15 @@ class TestBuildHistoryDf:
                 {
                     "rep": 2,
                     "valid": False,
+                    "min_knee_angle": 85.0,
                     "errors": ["KNEE_VALGUS", "NO_DEPTH"],
                     "descent_duration_sec": 1.0,
                     "ascent_duration_sec": 0.0,
                 }
             ]
         )
-        assert df.iloc[0]["Estado"] == "Fallo"
-        assert "KNEE_VALGUS" in df.iloc[0]["Errores"]
+        assert df.iloc[0]["Estado"] == "Fallida ✖"
+        assert "Valgo de rodilla" in df.iloc[0]["Errores"]
 
     def test_durations_rounded(self):
         df = _build_history_df(
@@ -175,6 +179,7 @@ class TestBuildHistoryDf:
                 {
                     "rep": 1,
                     "valid": True,
+                    "min_knee_angle": 85.0,
                     "errors": [],
                     "descent_duration_sec": 2.1234,
                     "ascent_duration_sec": 1.8765,
@@ -189,6 +194,7 @@ class TestBuildHistoryDf:
             {
                 "rep": i,
                 "valid": True,
+                "min_knee_angle": 85.0,
                 "errors": [],
                 "descent_duration_sec": 2.0,
                 "ascent_duration_sec": 1.5,
@@ -196,6 +202,29 @@ class TestBuildHistoryDf:
             for i in range(1, 6)
         ]
         assert len(_build_history_df(history)) == 5
+
+    def test_error_formatting_with_metric_values(self):
+        """Verifica el formato enriquecido de errores cuando hay valores disponibles."""
+        df = _build_history_df(
+            [
+                {
+                    "rep": 1,
+                    "valid": False,
+                    "min_knee_angle": 105.0,
+                    "depth_threshold": 90.0,
+                    "max_valgus_dev": 0.120,
+                    "max_torso_tilt": 45.0,
+                    "torso_threshold": 40.0,
+                    "errors": ["KNEE_VALGUS", "NO_DEPTH", "TORSO_TILT"],
+                    "descent_duration_sec": 1.0,
+                    "ascent_duration_sec": 0.0,
+                }
+            ]
+        )
+        errors = df.iloc[0]["Errores"]
+        assert "105°" in errors
+        assert "0.120" in errors
+        assert "45°" in errors
 
 
 class TestDetectRuntimeEnv:
