@@ -1,36 +1,63 @@
-import cv2
-import pytest
-import numpy as np
 from pathlib import Path
+
+import cv2
+import numpy as np
+import pytest
+
 from src.logic.pose_detector import PoseDetector
 
 
 def test_extract_landmarks_real_image():
-    assets_dir = Path(__file__).parent.parent / "assets"
-    image_path = assets_dir / "squat_check.jpg"
+    """Verifica que se extraen landmarks world correctos a partir de una imagen real.
 
+    Comprueba que world contiene la clave LEFT_KNEE con 4 componentes
+    (x, y, z, visibilidad) y que raw está disponible para el dibujo.
+    """
+    image_path = Path(__file__).parent.parent / "assets" / "squat_check.jpg"
     if not image_path.exists():
         pytest.fail(f"Falta el asset de prueba en: {image_path}")
 
     detector = PoseDetector(static_image_mode=True)
     frame = cv2.imread(str(image_path))
-
     result = detector.extract_landmarks(frame)
 
-    assert result.normalized is not None, "Debería devolver landmarks normalizados"
-    assert result.world is not None, "Debería devolver world landmarks"
-
-    assert "LEFT_KNEE" in result.normalized
-    assert result.world["LEFT_KNEE"][2] != result.normalized["LEFT_KNEE"][2]
-    coord_cnt = len(result.normalized["LEFT_KNEE"])
-    assert coord_cnt == 4, f"Se esperaban 4 coordenadas pero se obtuvieron {coord_cnt}"
+    assert result.world is not None
+    assert "LEFT_KNEE" in result.world
+    assert len(result.world["LEFT_KNEE"]) == 4
+    assert result.raw is not None
 
 
 def test_extract_landmarks_no_person():
+    """Verifica que un frame sin persona devuelve un PoseResult vacío."""
     detector = PoseDetector()
-    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    result = detector.extract_landmarks(np.zeros((480, 640, 3), dtype=np.uint8))
 
-    result = detector.extract_landmarks(frame)
+    assert result.world is None
+    assert result.raw is None
 
-    assert result.normalized is None, "No debería devolver landmarks normalizados"
-    assert result.world is None, "No debería devolver world landmarks"
+
+def test_extract_landmarks_none_frame():
+    """Verifica que un frame None devuelve un PoseResult vacío de forma segura."""
+    result = PoseDetector().extract_landmarks(None)
+
+    assert result.world is None
+    assert result.raw is None
+
+
+def test_reset_filters_clears_state():
+    """Verifica que reset_filters() vacía el diccionario interno de filtros."""
+    detector = PoseDetector()
+    detector._filter_dict(
+        {"LEFT_KNEE": np.array([0.1, 0.2, 0.3, 0.9])},
+        detector.filters_world,
+    )
+    assert len(detector.filters_world) > 0
+
+    detector.reset_filters()
+
+    assert len(detector.filters_world) == 0
+
+
+def test_filter_dict_none_input():
+    """Verifica que _filter_dict retorna None si la entrada es None."""
+    assert PoseDetector()._filter_dict(None, {}) is None

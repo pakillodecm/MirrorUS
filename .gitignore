@@ -9,3 +9,5 @@ build/
 *.egg-info/
 build/
 dist/
+.coverage
+coverage.xml

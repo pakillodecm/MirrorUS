@@ -20,23 +20,34 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
 
       - name: Install System Dependencies (OpenCV/MediaPipe)
         run: |
           sudo apt-get update
           sudo apt-get install -y libgl1 libusb-1.0-0
 
-      - name: Install Python Dependencies (inc. Dev)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install pre-commit
+      - name: Install Poetry
+        run: python -m pip install --upgrade pip poetry
 
-      - name: Run Linters (Linting)
-        run: pre-commit run --all-files --show-diff-on-failure
+      - name: Configure Poetry Virtualenv
+        run: poetry config virtualenvs.in-project true
 
-      - name: Run Tests (Pytest)
-        run: |
-          pip install pytest pytest-sugar
-          python -m pytest
+      - name: Cache Poetry Dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: poetry-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            poetry-${{ runner.os }}-
+
+      - name: Verify Dependencies Consistency
+        run: poetry check
+
+      - name: Install Project Dependencies (inc. Dev)
+        run: poetry install --no-interaction
+
+      - name: Run Linters (Linting via Poetry)
+        run: poetry run pre-commit run --all-files --show-diff-on-failure
+
+      - name: Run Tests (Pytest via Poetry)
+        run: poetry run pytest

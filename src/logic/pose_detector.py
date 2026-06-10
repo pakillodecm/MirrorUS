@@ -1,4 +1,4 @@
-from typing import Dict, NamedTuple, Optional
+from typing import Any, Dict, NamedTuple, Optional
 
 import cv2
 import mediapipe as mp
@@ -8,97 +8,85 @@ from src.logic.filters import OneEuroFilter
 
 
 class PoseResult(NamedTuple):
-    """Estructura de datos para los resultados de la detección."""
+    """Resultado de detección de pose para un fotograma."""
 
-    normalized: Optional[Dict[str, np.ndarray]]
     world: Optional[Dict[str, np.ndarray]]
-    raw: Optional[any]
+    raw: Optional[Any]
 
 
 class PoseDetector:
+    """Wrapper sobre MediaPipe Pose con filtrado One Euro en coordenadas world."""
+
     def __init__(
         self,
-        static_image_mode: bool = False,  # Por defecto para video
+        static_image_mode: bool = False,
         min_detection_confidence: float = 0.5,
         min_tracking_confidence: float = 0.7,
-        model_complexity: int = 1,  # 0=Rápido, 1=Equilibrado, 2=Pesado
+        model_complexity: int = 1,
     ):
-        self.mp_pose = mp.solutions.pose
-        self.mp_drawing = mp.solutions.drawing_utils
-        self.mp_drawing_styles = mp.solutions.drawing_styles
+        """Inicializa el detector con los parámetros de confianza de MediaPipe.
 
+        Args:
+            static_image_mode: True para imágenes estáticas, False para vídeo.
+            min_detection_confidence: Umbral mínimo de confianza en detección.
+            min_tracking_confidence: Umbral mínimo de confianza en seguimiento.
+            model_complexity: 0=Rápido, 1=Equilibrado, 2=Pesado.
+        """
+        self.mp_pose = mp.solutions.pose
         self.pose = self.mp_pose.Pose(
             static_image_mode=static_image_mode,
             model_complexity=model_complexity,
-            smooth_landmarks=True,
+            smooth_landmarks=False,  # evita doble filtrado con One Euro
             min_detection_confidence=min_detection_confidence,
             min_tracking_confidence=min_tracking_confidence,
         )
-
         self.filters_world = {}
 
     def _filter_dict(self, data_dict, filter_storage):
-        """
-        Aplica un filtro de suavizado (OneEuroFilter) a un diccionario de landmarks.
-
-        El filtrado es esencial para evitar que pequeñas vibraciones en la detección
-        generen falsos cambios de estado o ruido en el cálculo de ángulos.
-        """
+        """Aplica OneEuroFilter a cada coordenada xyz de un diccionario de landmarks."""
         if data_dict is None:
             return None
-
-        filtered_data = {}
+        filtered = {}
         for name, coords in data_dict.items():
             if name not in filter_storage:
-                # min_cutoff: Reduce el ruido cuando estamos quietos [0.1 - 5.0].
-                # beta: Reduce el retraso cuando nos movemos rápido [0.001 - 0.1].
-                filter_storage[name] = OneEuroFilter(min_cutoff=1.7, beta=0.07)
-
-            xyz_filtered = filter_storage[name].apply(coords[:3])
-            filtered_data[name] = np.array([*xyz_filtered, coords[3]])
-
-        return filtered_data
+                filter_storage[name] = OneEuroFilter(min_cutoff=0.8, beta=0.05)
+            xyz = filter_storage[name].apply(coords[:3])
+            filtered[name] = np.array([*xyz, coords[3]])
+        return filtered
 
     def extract_landmarks(self, frame: np.ndarray) -> PoseResult:
-        """
-        Procesa un frame y devuelve un objeto PoseResult con:
-        - normalized: Landmarks para dibujo (0.0 a 1.0).
-        - world: Landmarks métricos (metros reales).
-        - raw: Resultados sin procesar de MediaPipe.
+        """Procesa un fotograma y devuelve landmarks world filtrados y resultado raw.
+
+        Args:
+            frame: Imagen BGR de OpenCV. None produce un PoseResult vacío.
+
+        Returns:
+            PoseResult con world (landmarks en metros reales, filtrados con One Euro)
+            y raw (resultado directo de MediaPipe, para acceder a pose_landmarks
+            normalizados en el dibujo del esqueleto). Ambos campos son None si
+            no se detecta ninguna persona en el fotograma.
         """
         if frame is None:
-            return PoseResult(None, None, None)
+            return PoseResult(None, None)
 
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.pose.process(frame_rgb)
-
         if not results.pose_landmarks:
-            return PoseResult(None, None, None)
+            return PoseResult(None, None)
 
-        norm_dict = {}
-        for i, lm in enumerate(results.pose_landmarks.landmark):
-            name = self.mp_pose.PoseLandmark(i).name
-            norm_dict[name] = np.array([lm.x, lm.y, lm.z, lm.visibility])
-
-        world_dict = {}
-        for i, lm in enumerate(results.pose_world_landmarks.landmark):
-            name = self.mp_pose.PoseLandmark(i).name
-            world_dict[name] = np.array([lm.x, lm.y, lm.z, lm.visibility])
-
-        raw_result = PoseResult(normalized=norm_dict, world=world_dict, raw=results)
-        clean_world = self._filter_dict(raw_result.world, self.filters_world)
-
+        world_dict = {
+            self.mp_pose.PoseLandmark(i).name: np.array(
+                [lm.x, lm.y, lm.z, lm.visibility]
+            )
+            for i, lm in enumerate(results.pose_world_landmarks.landmark)
+        }
         return PoseResult(
-            normalized=raw_result.normalized, world=clean_world, raw=raw_result.raw
+            world=self._filter_dict(world_dict, self.filters_world),
+            raw=results,
         )
 
-    def draw_landmarks(self, frame, results_raw):
-        """Dibuja el esqueleto usando los resultados 'raw' de MediaPipe."""
-        if results_raw and results_raw.pose_landmarks:
-            df_pose_lm = self.mp_drawing_styles.get_default_pose_landmarks_style()
-            self.mp_drawing.draw_landmarks(
-                frame,
-                results_raw.pose_landmarks,
-                self.mp_pose.POSE_CONNECTIONS,
-                landmark_drawing_spec=df_pose_lm,
-            )
+    def reset_filters(self) -> None:
+        """Reinicia todos los filtros One Euro para iniciar una sesión limpia."""
+        for f in self.filters_world.values():
+            f.reset()
+        self.filters_world.clear()
