@@ -37,6 +37,7 @@ Los resultados se presentan en una interfaz Streamlit con retroalimentación vis
 
 - **Python 3.12**
 - **Poetry** (gestor de dependencias) Instrucciones de instalación en https://python-poetry.org/docs/#installation
+> **Nota:** tras instalar Poetry, abre una terminal nueva para que el comando `poetry` esté disponible en el PATH. En Windows, si `poetry` no se reconoce, consulta la sección de instalación de la documentación oficial.
 - Dependencias del sistema (necesarias para OpenCV y MediaPipe):
   - Linux: `libgl1`, `ffmpeg`
   - Windows/macOS: instaladas automáticamente con los paquetes
@@ -48,13 +49,10 @@ Los resultados se presentan en una interfaz Streamlit con retroalimentación vis
 ```bash
 # 1. Clonar el repositorio
 git clone https://github.com/pakillodecm/TFG-Pose-Tracking.git
-# 1.1. Entrar en el directorio creado
+cd TFG-Pose-Tracking
 
 # 2. Instalar dependencias con Poetry
 poetry install
-
-# 3. Activar el entorno virtual
-poetry shell
 ```
 
 ---
@@ -62,7 +60,7 @@ poetry shell
 ## Ejecución
 
 ```bash
-streamlit run app.py
+poetry run streamlit run app.py
 ```
 
 La aplicación se abre automáticamente en `http://localhost:8501`.
