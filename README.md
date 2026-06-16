@@ -50,8 +50,8 @@ Los resultados se presentan en una interfaz Streamlit con retroalimentación vis
 
 ```bash
 # 1. Clonar el repositorio
-git clone https://github.com/pakillodecm/TFG-Pose-Tracking.git
-cd TFG-Pose-Tracking
+git clone https://github.com/pakillodecm/MirrorUS.git
+cd MirrorUS
 
 # 2. Instalar dependencias con Poetry
 poetry install
