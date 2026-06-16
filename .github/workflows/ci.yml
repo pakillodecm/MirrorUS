@@ -40,11 +40,19 @@ jobs:
           restore-keys: |
             poetry-${{ runner.os }}-
 
+      - name: Cache Pre-Commit Hooks
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-${{ runner.os }}-
+
       - name: Verify Dependencies Consistency
         run: poetry check
 
       - name: Install Project Dependencies (inc. Dev)
-        run: poetry install --no-interaction
+        run: poetry install --with dev --no-interaction
 
       - name: Run Linters (Linting via Poetry)
         run: poetry run pre-commit run --all-files --show-diff-on-failure
