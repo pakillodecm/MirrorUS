@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "mirrorus"
 version = "0.1.0"
-description = "TFG Pose Tracking"
+description = "MirrorUS"
 authors = ["Francisco de Castro Mañas <frademann@alum.us.es>"]
 readme = "README.md"
 packages = [{include = "src"}]
