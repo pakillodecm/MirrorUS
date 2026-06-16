@@ -3,7 +3,7 @@ import os
 import pandas as pd
 import streamlit as st
 
-FSM_LINE_COLOR_DEFAULT = "#9aa1ab"
+FSM_LINE_COLOR_DEFAULT = "#9ba3af"
 
 SOURCE_CAMERA = "Cámara en vivo"
 SOURCE_FILE = "Archivo de vídeo"
@@ -368,8 +368,8 @@ def render_header_and_instructions(is_local: bool, source_mode: str) -> None:
     """
     st.markdown(
         "#### ✦ MirrorUS"
-        '<span style="font-size:14px;color:#9aa1ab;'
-        'font-weight:400;margin-left:10px;">'
+        '<span style="font-size:13px;color:#9ba3af;'
+        'font-weight:500;letter-spacing:0.04em;margin-left:10px;">'
         "Análisis Biomecánico · TFG</span>",
         unsafe_allow_html=True,
     )

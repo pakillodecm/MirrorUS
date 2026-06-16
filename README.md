@@ -1,7 +1,7 @@
 # ✦ MirrorUS — Análisis Biomecánico de Sentadilla
 
 **Trabajo Fin de Grado · Ingeniería del Software · ETSII Universidad de Sevilla**
-Autor: Francisco de Castro Mañas · Tutora: Diana Borrego
+Autor: Francisco de Castro Mañas · Tutora: Diana Borrego Núñez
 
 🔗 **Aplicación desplegada:** [mirrorus.streamlit.app](https://mirrorus.streamlit.app/)
 

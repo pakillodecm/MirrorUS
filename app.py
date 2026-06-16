@@ -70,7 +70,7 @@ _ERROR_VISUAL_CONFIG = {
 }
 
 _DEPTH_STATE_CONFIG = {
-    0: ("#9aa1ab", "○ Reposo"),
+    0: ("#9ba3af", "○ Reposo"),
     1: ("#d97706", "⬇ Bajando"),
     2: ("#16a34a", "◆ Zona profunda"),
     3: ("#0066cc", "⬆ Subiendo"),
@@ -194,7 +194,7 @@ def _depth_indicator_html(
     Returns:
         HTML listo para st.markdown con unsafe_allow_html=True.
     """
-    color, label = _DEPTH_STATE_CONFIG.get(fsm_state, ("#9aa1ab", "—"))
+    color, label = _DEPTH_STATE_CONFIG.get(fsm_state, ("#9ba3af", "—"))
     pct = int(progress * 100)
     min_pct = int(min_progress * 100)
 
@@ -213,7 +213,7 @@ def _depth_indicator_html(
         '<div style="height:3px;position:relative;margin-top:1px;">'
         f'<div style="position:absolute;left:{min_pct}%;'
         "transform:translateX(-50%);width:2px;height:3px;"
-        'background:#374151;border-radius:1px;"></div></div>'
+        'background:#3a4453;border-radius:1px;"></div></div>'
         if min_pct > 2
         else ""
     )
@@ -221,11 +221,12 @@ def _depth_indicator_html(
     return (
         '<div style="margin-top:6px;">'
         '<div style="display:flex;justify-content:space-between;'
-        f'font-size:11px;color:#6b7280;margin-bottom:4px;">'
-        f"<span>Profundidad</span>{right_label}</div>"
-        '<div style="height:6px;background:#e1e4e9;border-radius:3px;overflow:hidden;">'
+        f'font-size:11px;color:#6b7785;margin-bottom:4px;">'
+        '<span style="font-weight:600;letter-spacing:0.04em;">'
+        f"Profundidad</span>{right_label}</div>"
+        '<div style="height:6px;background:#e3e6ec;border-radius:4px;overflow:hidden;">'
         f'<div style="width:{pct}%;height:6px;background:{color};'
-        'border-radius:3px;"></div>'
+        'border-radius:4px;"></div>'
         f"</div>{min_tick}</div>"
     )
 
@@ -238,28 +239,28 @@ def _video_placeholder_html() -> str:
     """
     corner = (
         "position:absolute;width:20px;height:20px;"
-        "border-color:#1e2738;border-style:solid;"
+        "border-color:#202a3d;border-style:solid;"
     )
     return (
-        '<div style="background:#0a0d12;border-radius:9px;'
+        '<div style="background:#0b0e14;border-radius:10px;'
         "min-height:340px;display:flex;flex-direction:column;"
         "align-items:center;justify-content:center;"
-        'border:0.5px solid #1a2030;position:relative;padding:28px;">'
+        'border:0.5px solid #1b2233;position:relative;padding:28px;">'
         f'<div style="{corner}top:14px;left:14px;border-width:2px 0 0 2px;"></div>'
         f'<div style="{corner}top:14px;right:14px;border-width:2px 2px 0 0;"></div>'
         f'<div style="{corner}bottom:14px;left:14px;border-width:0 0 2px 2px;"></div>'
         f'<div style="{corner}bottom:14px;right:14px;border-width:0 2px 2px 0;"></div>'
-        '<div style="font-size:10px;color:#2e3848;font-weight:600;'
+        '<div style="font-size:10px;color:#303c50;font-weight:600;'
         "letter-spacing:0.18em;text-transform:uppercase;"
         'margin-bottom:26px;font-family:monospace;">Sin señal de vídeo</div>'
         '<div style="display:flex;flex-direction:column;gap:10px;">'
-        '<div style="font-size:11px;color:#2e3d52;">'
+        '<div style="font-size:11px;color:#31415a;">'
         "&mdash;&nbsp; Posicionate frente a la cámara</div>"
-        '<div style="font-size:11px;color:#2e3d52;">'
+        '<div style="font-size:11px;color:#31415a;">'
         "&mdash;&nbsp; Distancia recomendada: 2 a 3 metros</div>"
-        '<div style="font-size:11px;color:#2e3d52;">'
+        '<div style="font-size:11px;color:#31415a;">'
         "&mdash;&nbsp; Pies completamente visibles en el encuadre</div>"
-        '<div style="font-size:11px;color:#2e3d52;">'
+        '<div style="font-size:11px;color:#31415a;">'
         "&mdash;&nbsp; Iluminación frontal uniforme, sin contraluz</div>"
         "</div></div>"
     )
