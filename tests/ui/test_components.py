@@ -337,8 +337,9 @@ class TestRenderLeftPanel:
     @patch("src.ui.components.st")
     def test_calls_container(self, mock_st):
         mock_st.columns.return_value = [MagicMock(), MagicMock()]
-        render_left_panel(_make_placeholder(), 0, 0, 0, 0.0, 0.0)
-        _make_placeholder().container.call_count  # just verifying call pattern
+        placeholder = _make_placeholder()
+        render_left_panel(placeholder, 0, 0, 0, 0.0, 0.0)
+        placeholder.container.assert_called_once()
 
     @patch("src.ui.components.st")
     def test_all_states_render_metric(self, mock_st):
